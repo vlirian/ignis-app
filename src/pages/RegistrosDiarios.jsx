@@ -143,7 +143,7 @@ export default function RegistrosDiarios() {
   }
 
   return (
-    <div className="animate-in" style={{ padding: '24px 28px' }}>
+    <div className="animate-in page-container">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
         <div>
           <div style={{ fontFamily: 'Barlow Condensed', fontSize: 28, fontWeight: 900, letterSpacing: 1 }}>🗂️ Registros diarios</div>
@@ -153,7 +153,7 @@ export default function RegistrosDiarios() {
       </div>
 
       <div className="card" style={{ padding: 14, marginBottom: 16 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 180px 220px 220px auto', gap: 10 }}>
+        <div className="registros-filters">
           <div className="form-group" style={{ marginBottom: 0 }}>
             <label className="form-label">Filtrar por fecha</label>
             <input className="form-input" type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} />
@@ -209,7 +209,7 @@ export default function RegistrosDiarios() {
                   </div>
                   <button className="btn btn-danger btn-sm" onClick={() => deleteGroup(group)}>Borrar bloque</button>
                 </div>
-                <table className="table">
+                <div className="table-wrap"><table className="table">
                   <thead>
                     <tr>
                       <th>Unidad</th>
@@ -230,14 +230,14 @@ export default function RegistrosDiarios() {
                         </td>
                         <td>{r.incidents?.length || 0}</td>
                         <td style={{ fontSize: 12, color: 'var(--mid)' }}>{r.reviewed_by || '—'}</td>
-                        <td style={{ display: 'flex', gap: 6 }}>
+                        <td className="reg-row-actions" style={{ display: 'flex', gap: 6 }}>
                           <button className="btn btn-ghost btn-sm" onClick={() => setEditState(emptyEditState(r))}>Editar</button>
                           <button className="btn btn-danger btn-sm" onClick={() => deleteReport(r.id)}>Borrar</button>
                         </td>
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
               </div>
             )
           })}

@@ -397,13 +397,13 @@ export default function Revision() {
       <div className="animate-in" style={{ padding: '0', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
 
         {/* Topbar de revisión */}
-        <div style={{
+        <div className="revision-topbar" style={{
           background: 'var(--ash)', borderBottom: '2px solid ' + c.border,
           padding: '12px 24px', display: 'flex', alignItems: 'center',
           justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, flexShrink: 0,
           position: 'sticky', top: 0, zIndex: 50,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div className="revision-topbar-main" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <button
               className="btn btn-ghost btn-sm"
               onClick={() => { setView('calendar'); setReviewState(null) }}
@@ -424,7 +424,7 @@ export default function Revision() {
           </div>
 
           {/* Navegación entre unidades */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div className="revision-unit-tabs">
             {units.map((u, i) => {
               const done = Object.values(u.itemChecks).every(v => v === 'ok' || v === 'issue')
               const partial = Object.values(u.itemChecks).some(v => v !== null)
@@ -448,7 +448,7 @@ export default function Revision() {
           </div>
 
           <button
-            className="btn btn-primary btn-sm"
+            className="btn btn-primary btn-sm revision-save-btn"
             onClick={saveReview}
             disabled={saving}
             style={{
@@ -461,13 +461,13 @@ export default function Revision() {
         </div>
 
         {/* Contenido principal */}
-        <div style={{ flex: 1, padding: '20px 24px', display: 'flex', gap: 20 }}>
+        <div className="revision-layout">
 
           {/* Panel izquierdo — artículos */}
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="revision-main">
 
             {/* Header unidad */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+            <div className="revision-unit-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
               <div>
                 <div style={{ fontFamily: 'Barlow Condensed', fontSize: 26, fontWeight: 900, letterSpacing: 1 }}>
                   🚒 Unidad {activeUnit.unitId}
@@ -476,7 +476,7 @@ export default function Revision() {
                   {checkedCount} de {totalItems} artículos verificados
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <div className="revision-progress-actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 {/* Barra progreso */}
                 <div style={{ width: 120, height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
                   <div style={{ height: '100%', width: `${totalItems ? (checkedCount / totalItems) * 100 : 0}%`, background: allDone ? 'var(--green)' : 'var(--fire)', borderRadius: 3, transition: 'width 0.3s' }} />
@@ -652,7 +652,7 @@ export default function Revision() {
           </div>
 
           {/* Panel derecho — incidencias y notas */}
-          <div style={{ width: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="revision-side">
 
             {/* Estado de la unidad */}
             <div className="card" style={{ padding: '14px 16px' }}>
@@ -787,7 +787,7 @@ export default function Revision() {
   const { daysInMonth, startOffset } = monthDays(viewYear, viewMonth)
 
   return (
-    <div className="animate-in" style={{ padding: '24px 28px' }}>
+    <div className="animate-in page-container">
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
@@ -836,14 +836,14 @@ export default function Revision() {
       </div>
 
       {/* Calendario */}
-      <div className="card" style={{ overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}>
+      <div className="card calendar-scroll">
+        <div className="calendar-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}>
           {['LUN','MAR','MIÉ','JUE','VIE','SÁB','DOM'].map(d => (
             <div key={d} style={{ padding: '8px 4px', textAlign: 'center', fontSize: 10, fontWeight: 700, letterSpacing: 1.5, color: 'var(--mid)' }}>{d}</div>
           ))}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+        <div className="calendar-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
           {Array.from({ length: startOffset }, (_, i) => (
             <div key={`e-${i}`} style={{ minHeight: 110, borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)', background: 'rgba(0,0,0,0.1)' }} />
           ))}

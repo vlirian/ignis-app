@@ -32,7 +32,7 @@ export default function Dashboard() {
   const topColors = { info: 'var(--blue)', ok: 'var(--green)', warn: 'var(--yellow)', alert: 'var(--red)' }
 
   return (
-    <div className="animate-in" style={{ padding: '24px 28px' }}>
+    <div className="animate-in page-container">
 
       {/* KPIs */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 14, marginBottom: 24 }}>
@@ -78,7 +78,7 @@ export default function Dashboard() {
           <div className="card-title">🚒 Estado de unidades</div>
           <button className="btn btn-ghost btn-sm" onClick={() => navigate('/unidades')}>Ver detalle</button>
         </div>
-        <table className="table">
+        <div className="table-wrap"><table className="table">
           <thead>
             <tr>
               <th>Unidad</th>
@@ -115,7 +115,7 @@ export default function Dashboard() {
               )
             })}
           </tbody>
-        </table>
+        </table></div>
       </div>
     </div>
   )

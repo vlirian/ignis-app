@@ -73,7 +73,7 @@ export default function Alertas() {
   const totalAlerts = stockAlerts.length + issueAlerts.length
 
   return (
-    <div className="animate-in" style={{ padding: '24px 28px' }}>
+    <div className="animate-in page-container">
 
       {/* Summary cards */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
@@ -125,7 +125,7 @@ export default function Alertas() {
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--mid)' }}>Fuente única compartida entre Revisiones y Unidades</div>
               </div>
-              <table className="table">
+              <div className="table-wrap"><table className="table">
                 <thead>
                   <tr>
                     <th>Unidad</th>
@@ -176,7 +176,7 @@ export default function Alertas() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             </div>
           )}
 
@@ -186,7 +186,7 @@ export default function Alertas() {
               <div className="card-header">
                 <div className="card-title">🚨 Alertas de stock ({stockAlerts.length})</div>
               </div>
-              <table className="table">
+              <div className="table-wrap"><table className="table">
                 <thead>
                   <tr>
                     <th>Prioridad</th>
@@ -223,7 +223,7 @@ export default function Alertas() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             </div>
           )}
 

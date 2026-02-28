@@ -100,7 +100,7 @@ export default function UnidadDetail() {
   const zonesToShow = selectedZone ? zones.filter(z => z.id === selectedZone) : zones
 
   return (
-    <div className="animate-in" style={{ padding: '24px 28px' }}>
+    <div className="animate-in page-container">
 
       {/* Breadcrumb */}
       <div style={{ fontSize: 12, color: 'var(--mid)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>

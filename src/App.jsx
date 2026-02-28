@@ -68,23 +68,22 @@ function AppInner() {
   const userEmail = session?.user?.email || ''
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
+    <div className="app-shell">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      <div style={{ marginLeft: 'var(--sidebar-width)', flex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+      <div className="app-main">
         <div className="topbar">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button className="btn-icon" id="hamburger" style={{ display: 'none' }} onClick={() => setSidebarOpen(o => !o)}>☰</button>
+          <div className="topbar-left">
+            <button className="btn-icon" id="hamburger" onClick={() => setSidebarOpen(o => !o)}>☰</button>
             <div className="topbar-title">{title}</div>
           </div>
-          <GlobalSearch />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{
-              background: 'rgba(255,255,255,0.07)', border: '1px solid var(--border)',
-              borderRadius: 20, padding: '3px 10px', fontSize: 11, color: 'var(--light)',
-            }}>
-              👤 {userEmail}
-            </span>
+
+          <div className="topbar-search-wrap">
+            <GlobalSearch />
+          </div>
+
+          <div className="topbar-right">
+            <span className="user-chip" title={userEmail}>👤 {userEmail}</span>
             <button onClick={logout} className="btn btn-ghost btn-sm" style={{ fontSize: 11, color: 'var(--mid)', padding: '4px 10px' }} title="Cerrar sesión">
               ⎋ Salir
             </button>
@@ -109,13 +108,6 @@ function AppInner() {
 
       <IncidentBanner />
       <Toast />
-
-      <style>{`
-        @media (max-width: 768px) {
-          #hamburger { display: flex !important; }
-          [style*="margin-left: var(--sidebar-width)"] { margin-left: 0 !important; }
-        }
-      `}</style>
     </div>
   )
 }

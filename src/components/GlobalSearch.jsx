@@ -126,20 +126,21 @@ export default function GlobalSearch() {
     <>
       {/* Botón en topbar */}
       <button
+        className="global-search-trigger"
         onClick={() => setOpen(true)}
         style={{
           display: 'flex', alignItems: 'center', gap: 8,
           background: 'var(--panel)', border: '1px solid var(--border2)',
           borderRadius: 8, padding: '6px 12px', cursor: 'pointer',
           color: 'var(--mid)', fontSize: 13, fontFamily: 'Barlow',
-          transition: 'all 0.15s', minWidth: 180,
+          transition: 'all 0.15s', 
         }}
         onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border2)'; e.currentTarget.style.color = 'var(--light)' }}
         onMouseLeave={e => { e.currentTarget.style.borderColor = ''; e.currentTarget.style.color = '' }}
       >
         <span style={{ fontSize: 15 }}>🔍</span>
         <span style={{ flex: 1, textAlign: 'left' }}>Buscar material...</span>
-        <kbd style={{
+        <kbd className="global-search-kbd" style={{
           background: 'var(--border)', border: '1px solid var(--border2)',
           borderRadius: 4, padding: '1px 5px', fontSize: 10,
           color: 'var(--mid)', fontFamily: 'monospace',

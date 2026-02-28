@@ -11,7 +11,7 @@ export default function UnidadesList() {
   const chipClass  = { ok: 'chip-ok', warn: 'chip-warn', alert: 'chip-alert' }
 
   return (
-    <div className="animate-in" style={{ padding: '24px 28px' }}>
+    <div className="animate-in page-container">
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: 12 }}>
         {UNIT_IDS.map(id => {
           const cfg = configs[id]
