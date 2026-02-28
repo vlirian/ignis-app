@@ -193,9 +193,14 @@ export default function Administracion() {
       .insert(archivePayload)
 
     if (archiveErr) {
-      setReviewActionLoading(false)
-      showToast(`No se pudo archivar antes de borrar: ${archiveErr.message || 'error'}`, 'error')
-      return
+      const forceDelete = window.confirm(
+        `No se pudo archivar (${archiveErr.message || 'error'}).\n\n¿Quieres borrar igualmente sin posibilidad de restaurar?`
+      )
+      if (!forceDelete) {
+        setReviewActionLoading(false)
+        showToast('Borrado cancelado. No se eliminó ninguna revisión.', 'warn')
+        return
+      }
     }
 
     const ids = rows.map(r => r.id)
