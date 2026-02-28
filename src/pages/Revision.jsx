@@ -50,6 +50,7 @@ export default function Revision() {
 
   const [viewYear,  setViewYear]  = useState(now.getFullYear())
   const [viewMonth, setViewMonth] = useState(now.getMonth())
+  const [calendarView, setCalendarView] = useState('today') // 'today' | 'month'
   const [reports,   setReports]   = useState([])
   const [loadingReports, setLoadingReports] = useState(true)
   const [historyModal, setHistoryModal] = useState(null)
@@ -224,6 +225,7 @@ export default function Revision() {
   }
 
   const monthName = new Date(viewYear, viewMonth, 1).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
+  const today = todayStr()
 
   // ── VISTA REVISIÓN ────────────────────────────────────────
   if (view === 'review' && reviewState) {
@@ -796,24 +798,37 @@ export default function Revision() {
             📅 Revisiones Diarias
           </div>
           <div style={{ fontSize: 12, color: 'var(--mid)', marginTop: 3 }}>
-            Pulsa un BV del día de hoy para iniciar tu revisión
+            Solo puedes revisar el día actual. Días pasados/futuros aparecen bloqueados.
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => {
-            if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1) }
-            else setViewMonth(m => m - 1)
-          }}>‹</button>
-          <span style={{ fontFamily: 'Barlow Condensed', fontSize: 16, fontWeight: 700, textTransform: 'capitalize', minWidth: 160, textAlign: 'center' }}>
-            {monthName}
-          </span>
-          <button className="btn btn-ghost btn-sm" onClick={() => {
-            if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1) }
-            else setViewMonth(m => m + 1)
-          }}>›</button>
-          <button className="btn btn-ghost btn-sm" onClick={() => { setViewMonth(now.getMonth()); setViewYear(now.getFullYear()) }}>
-            Hoy
-          </button>
+          <select
+            className="form-select"
+            style={{ minWidth: 170 }}
+            value={calendarView}
+            onChange={e => setCalendarView(e.target.value)}
+          >
+            <option value="today">Vista del día</option>
+            <option value="month">Vista mensual</option>
+          </select>
+          {calendarView === 'month' && (
+            <>
+              <button className="btn btn-ghost btn-sm" onClick={() => {
+                if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1) }
+                else setViewMonth(m => m - 1)
+              }}>‹</button>
+              <span style={{ fontFamily: 'Barlow Condensed', fontSize: 16, fontWeight: 700, textTransform: 'capitalize', minWidth: 160, textAlign: 'center' }}>
+                {monthName}
+              </span>
+              <button className="btn btn-ghost btn-sm" onClick={() => {
+                if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1) }
+                else setViewMonth(m => m + 1)
+              }}>›</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => { setViewMonth(now.getMonth()); setViewYear(now.getFullYear()) }}>
+                Hoy
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -835,43 +850,53 @@ export default function Revision() {
         })}
       </div>
 
-      {/* Calendario */}
-      <div className="card calendar-scroll">
-        <div className="calendar-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}>
-          {['LUN','MAR','MIÉ','JUE','VIE','SÁB','DOM'].map(d => (
-            <div key={d} style={{ padding: '8px 4px', textAlign: 'center', fontSize: 10, fontWeight: 700, letterSpacing: 1.5, color: 'var(--mid)' }}>{d}</div>
-          ))}
+      {calendarView === 'today' ? (
+        <TodayPanel
+          date={today}
+          reportIndex={reportIndex}
+          onStart={startReview}
+          onHistory={(date, bvId) => setHistoryModal({ date, bomberoId: bvId })}
+        />
+      ) : (
+        <div className="card calendar-scroll">
+          <div className="calendar-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}>
+            {['LUN','MAR','MIÉ','JUE','VIE','SÁB','DOM'].map(d => (
+              <div key={d} style={{ padding: '8px 4px', textAlign: 'center', fontSize: 10, fontWeight: 700, letterSpacing: 1.5, color: 'var(--mid)' }}>{d}</div>
+            ))}
+          </div>
+
+          <div className="calendar-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+            {Array.from({ length: startOffset }, (_, i) => (
+              <div key={`e-${i}`} style={{ minHeight: 110, borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)', background: 'rgba(0,0,0,0.1)' }} />
+            ))}
+
+            {Array.from({ length: daysInMonth }, (_, i) => {
+              const day     = i + 1
+              const date    = dateStr(viewYear, viewMonth, day)
+              const isToday = date === today
+              const isFuture= date > today
+              const isPast = date < today
+              const col     = (startOffset + i) % 7
+              return (
+                <DayCell key={date} day={day} date={date} isToday={isToday} isFuture={isFuture}
+                  isPast={isPast}
+                  isWeekend={col >= 5} reportIndex={reportIndex}
+                  onStart={startReview}
+                  onHistory={(date, bvId) => setHistoryModal({ date, bomberoId: bvId })}
+                />
+              )
+            })}
+
+            {(() => {
+              const rem = (startOffset + daysInMonth) % 7
+              if (rem === 0) return null
+              return Array.from({ length: 7 - rem }, (_, i) => (
+                <div key={`f-${i}`} style={{ minHeight: 110, borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)', background: 'rgba(0,0,0,0.1)' }} />
+              ))
+            })()}
+          </div>
         </div>
-
-        <div className="calendar-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
-          {Array.from({ length: startOffset }, (_, i) => (
-            <div key={`e-${i}`} style={{ minHeight: 110, borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)', background: 'rgba(0,0,0,0.1)' }} />
-          ))}
-
-          {Array.from({ length: daysInMonth }, (_, i) => {
-            const day     = i + 1
-            const date    = dateStr(viewYear, viewMonth, day)
-            const isToday = date === todayStr()
-            const isFuture= date > todayStr()
-            const col     = (startOffset + i) % 7
-            return (
-              <DayCell key={date} day={day} date={date} isToday={isToday} isFuture={isFuture}
-                isWeekend={col >= 5} reportIndex={reportIndex}
-                onStart={startReview}
-                onHistory={(date, bvId) => setHistoryModal({ date, bomberoId: bvId })}
-              />
-            )
-          })}
-
-          {(() => {
-            const rem = (startOffset + daysInMonth) % 7
-            if (rem === 0) return null
-            return Array.from({ length: 7 - rem }, (_, i) => (
-              <div key={`f-${i}`} style={{ minHeight: 110, borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)', background: 'rgba(0,0,0,0.1)' }} />
-            ))
-          })()}
-        </div>
-      </div>
+      )}
 
       {/* Modal historial */}
       {historyModal && (
@@ -887,6 +912,53 @@ export default function Revision() {
           onClose={() => setHistoryModal(null)}
         />
       )}
+    </div>
+  )
+}
+
+function TodayPanel({ date, reportIndex, onStart, onHistory }) {
+  const todayLabel = new Date(date + 'T12:00:00').toLocaleDateString('es-ES', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+  })
+
+  return (
+    <div className="card" style={{ padding: 16 }}>
+      <div style={{ fontFamily: 'Barlow Condensed', fontSize: 22, fontWeight: 800, marginBottom: 4 }}>
+        📍 Revisión de hoy
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--mid)', textTransform: 'capitalize', marginBottom: 14 }}>
+        {todayLabel}
+      </div>
+
+      <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))' }}>
+        {Object.entries(BV_UNITS).map(([bvId, units]) => {
+          const bv   = parseInt(bvId)
+          const key  = `${date}-${bv}`
+          const reps = reportIndex[key] || []
+          const done = reps.length >= units.length
+          const hasIncident = reps.some(r => !r.is_ok)
+          const partial = reps.length > 0 && !done
+          const c = BV_COLORS[bv]
+          return (
+            <button key={bv}
+              className="calendar-bv-btn"
+              onClick={() => done ? onHistory(date, bv) : onStart(date, bv)}
+              style={{
+                textAlign: 'left', padding: '8px 10px', borderRadius: 8, fontSize: 13,
+                fontFamily: 'Barlow Condensed', fontWeight: 700, cursor: 'pointer',
+                border: `1px solid ${done ? (hasIncident ? 'var(--red)' : c.border) : partial ? c.border : 'var(--border)'}`,
+                background: done ? (hasIncident ? 'rgba(192,57,43,0.2)' : c.bg) : partial ? c.bg : 'transparent',
+                color: done ? (hasIncident ? 'var(--red-l)' : c.text) : partial ? c.text : 'var(--light)',
+                display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s',
+              }}
+            >
+              <span>{done ? (hasIncident ? '⚠' : '✔') : partial ? '◑' : '○'}</span>
+              <span style={{ flex: 1 }}>BV{bv}</span>
+              {partial && <span style={{ opacity: 0.65 }}>({reps.length}/{units.length})</span>}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -956,15 +1028,16 @@ function IncidentPanel({ incidents, zones, onAdd, onRemove }) {
 }
 
 // ── Celda del calendario ──────────────────────────────────
-function DayCell({ day, date, isToday, isFuture, isWeekend, reportIndex, onStart, onHistory }) {
+function DayCell({ day, date, isToday, isFuture, isPast, isWeekend, reportIndex, onStart, onHistory }) {
+  const locked = !isToday
   return (
-    <div style={{
+    <div className="calendar-day-cell" style={{
       minHeight: 110, padding: '6px 4px',
       borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)',
       background: isToday ? 'rgba(255,69,0,0.04)' : isWeekend ? 'rgba(0,0,0,0.07)' : 'transparent',
       outline: isToday ? '2px solid rgba(255,69,0,0.25)' : 'none', outlineOffset: -2,
     }}>
-      <div style={{ fontSize: 11, fontWeight: isToday ? 800 : 400, color: isToday ? 'var(--fire)' : isFuture ? 'var(--border2)' : 'var(--mid)', textAlign: 'right', paddingRight: 4, marginBottom: 4 }}>
+      <div className="calendar-day-number" style={{ fontSize: 11, fontWeight: isToday ? 800 : 400, color: isToday ? 'var(--fire)' : (isFuture || isPast) ? 'var(--border2)' : 'var(--mid)', textAlign: 'right', paddingRight: 4, marginBottom: 4 }}>
         {isToday
           ? <span style={{ background: 'var(--fire)', color: 'white', borderRadius: 4, padding: '0 5px' }}>{day}</span>
           : day}
@@ -979,20 +1052,37 @@ function DayCell({ day, date, isToday, isFuture, isWeekend, reportIndex, onStart
           const partial = reps.length > 0 && !done
           const c = BV_COLORS[bv]
           return (
-            <button key={bv} disabled={isFuture}
+            <button key={bv}
+              className={`calendar-bv-btn ${locked ? 'locked' : ''}`}
+              disabled={locked}
+              title={locked ? 'Solo se puede revisar el día actual' : done ? 'Ver informe del día' : 'Iniciar revisión del día'}
               onClick={() => done ? onHistory(date, bv) : onStart(date, bv)}
               style={{
                 width: '100%', textAlign: 'left', padding: '2px 5px', borderRadius: 4,
                 fontSize: 10, fontFamily: 'Barlow Condensed', fontWeight: 700,
-                cursor: isFuture ? 'default' : 'pointer',
-                border: `1px solid ${done ? (hasIncident ? 'var(--red)' : c.border) : partial ? c.border : 'var(--border)'}`,
-                background: done ? (hasIncident ? 'rgba(192,57,43,0.2)' : c.bg) : partial ? c.bg : 'transparent',
-                color: done ? (hasIncident ? 'var(--red-l)' : c.text) : partial ? c.text : isFuture ? 'var(--border2)' : 'var(--mid)',
-                opacity: isFuture ? 0.35 : 1, transition: 'all 0.1s',
+                cursor: locked ? 'not-allowed' : 'pointer',
+                border: `1px solid ${
+                  locked
+                    ? 'var(--border)'
+                    : done
+                      ? (hasIncident ? 'var(--red)' : c.border)
+                      : partial ? c.border : 'var(--border)'
+                }`,
+                background: locked
+                  ? 'rgba(0,0,0,0.14)'
+                  : done
+                    ? (hasIncident ? 'rgba(192,57,43,0.2)' : c.bg)
+                    : partial ? c.bg : 'transparent',
+                color: locked
+                  ? 'var(--border2)'
+                  : done
+                    ? (hasIncident ? 'var(--red-l)' : c.text)
+                    : partial ? c.text : 'var(--mid)',
+                opacity: locked ? 0.75 : 1, transition: 'all 0.15s',
                 display: 'flex', alignItems: 'center', gap: 3,
               }}
             >
-              <span>{done ? (hasIncident ? '⚠' : '✔') : partial ? '◑' : '○'}</span>
+              <span>{locked ? '🚫' : done ? (hasIncident ? '⚠' : '✔') : partial ? '◑' : '○'}</span>
               <span>BV{bv}</span>
               {partial && <span style={{ opacity: 0.6 }}>({reps.length}/{units.length})</span>}
             </button>

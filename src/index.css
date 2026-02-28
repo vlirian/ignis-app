@@ -449,6 +449,25 @@ a { text-decoration: none; color: inherit; }
   min-width: 760px;
 }
 
+.calendar-day-cell {
+  transition: background 0.15s ease;
+}
+
+.calendar-day-cell:hover {
+  background: rgba(255,255,255,0.02);
+}
+
+.calendar-bv-btn:hover:not(:disabled) {
+  border-color: var(--fire) !important;
+  box-shadow: 0 0 0 1px rgba(255, 69, 0, 0.28), 0 8px 18px rgba(0, 0, 0, 0.28);
+  transform: translateY(-1px);
+}
+
+.calendar-bv-btn.locked:hover {
+  box-shadow: none;
+  transform: none;
+}
+
 .registros-filters {
   display: grid;
   grid-template-columns: 1fr 180px 220px 220px auto;
@@ -508,7 +527,23 @@ a { text-decoration: none; color: inherit; }
   }
 
   .calendar-grid {
-    min-width: 680px;
+    min-width: 560px;
+  }
+
+  .calendar-day-cell {
+    min-height: 92px !important;
+    padding: 5px 3px !important;
+  }
+
+  .calendar-day-number {
+    font-size: 10px !important;
+    margin-bottom: 3px !important;
+  }
+
+  .calendar-bv-btn {
+    font-size: 11px !important;
+    padding: 4px 6px !important;
+    margin-bottom: 2px;
   }
 
   .registros-filters {
