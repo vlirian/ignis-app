@@ -40,6 +40,7 @@ export function AppProvider({ children }) {
   const [toast, setToast]         = useState(null)
   const [session, setSession]     = useState(null)
   const [authReady, setAuthReady] = useState(false)
+  const [recovering, setRecovering] = useState(false)
   const [reviews, setReviews]     = useState({})
   const [itemStates, setItemStates] = useState({})
   const [revisionIncidents, setRevisionIncidents] = useState([])  // incidencias de informes BV de hoy
@@ -48,14 +49,25 @@ export function AppProvider({ children }) {
 
   // ── Auth ──────────────────────────────────────────────
   useEffect(() => {
+    const hash = window.location.hash || ''
+    if (hash.includes('type=recovery')) setRecovering(true)
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       setAuthReady(true)
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') setRecovering(true)
       setSession(session)
     })
     return () => subscription.unsubscribe()
+  }, [])
+
+  const finishRecovery = useCallback(() => {
+    setRecovering(false)
+    if (window.location.hash.includes('type=recovery')) {
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.search)
+    }
   }, [])
 
   useEffect(() => {
@@ -425,7 +437,7 @@ export function AppProvider({ children }) {
 
   return (
     <AppContext.Provider value={{
-      session, authReady, isAdmin, logout,
+      session, authReady, recovering, finishRecovery, isAdmin, logout,
       configs: state.configs, items: state.items, reviews,
       loading, toast, showToast,
       itemStates, setUnitItemState, setUnitAllItemStates,

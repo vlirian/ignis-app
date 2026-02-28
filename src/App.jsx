@@ -6,6 +6,7 @@ import Toast from './components/Toast'
 import GlobalSearch from './components/GlobalSearch'
 import IncidentBanner from './components/IncidentBanner'
 import LoginPage from './pages/LoginPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 import Dashboard from './pages/Dashboard'
 import UnidadesList from './pages/UnidadesList'
 import UnidadDetail from './pages/UnidadDetail'
@@ -50,8 +51,10 @@ function LoadingScreen() {
 
 function AppInner() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const { loading, session, authReady, logout } = useApp()
+  const { loading, session, authReady, recovering, logout } = useApp()
   const location = useLocation()
+
+  if (recovering) return <ResetPasswordPage />
 
   if (!authReady || (!session && !loading)) {
     if (!authReady) return <LoadingScreen />
