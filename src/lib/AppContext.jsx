@@ -50,7 +50,8 @@ export function AppProvider({ children }) {
   // ── Auth ──────────────────────────────────────────────
   useEffect(() => {
     const hash = window.location.hash || ''
-    if (hash.includes('type=recovery')) setRecovering(true)
+    const search = window.location.search || ''
+    if (hash.includes('type=recovery') || search.includes('type=recovery')) setRecovering(true)
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)

@@ -1,14 +1,41 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../lib/AppContext'
 
 export default function ResetPasswordPage() {
   const { finishRecovery } = useApp()
+  const [ready, setReady] = useState(false)
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [ok, setOk] = useState(false)
+
+  useEffect(() => {
+    let mounted = true
+    const boot = async () => {
+      const url = new URL(window.location.href)
+      const code = url.searchParams.get('code')
+      const type = url.searchParams.get('type')
+      const tokenHash = url.searchParams.get('token_hash')
+
+      // 1) Flujo PKCE: ?code=...
+      if (code) {
+        const { error: exErr } = await supabase.auth.exchangeCodeForSession(code)
+        if (exErr && mounted) setError(exErr.message || 'No se pudo validar el enlace')
+      }
+
+      // 2) Flujo token_hash
+      if (type === 'recovery' && tokenHash) {
+        const { error: otpErr } = await supabase.auth.verifyOtp({ type: 'recovery', token_hash: tokenHash })
+        if (otpErr && mounted) setError(otpErr.message || 'No se pudo validar el enlace')
+      }
+
+      if (mounted) setReady(true)
+    }
+    boot()
+    return () => { mounted = false }
+  }, [])
 
   const submit = async (e) => {
     e.preventDefault()
@@ -42,8 +69,8 @@ export default function ResetPasswordPage() {
           {error && <div style={{ color: 'var(--red-l)', fontSize: 12, marginBottom: 10 }}>⚠ {error}</div>}
           {ok && <div style={{ color: 'var(--green-l)', fontSize: 12, marginBottom: 10 }}>✔ Contraseña actualizada</div>}
 
-          <button className="btn btn-primary" type="submit" disabled={loading} style={{ width: '100%' }}>
-            {loading ? 'Guardando...' : 'Guardar contraseña'}
+          <button className="btn btn-primary" type="submit" disabled={loading || !ready} style={{ width: '100%' }}>
+            {loading ? 'Guardando...' : !ready ? 'Validando enlace...' : 'Guardar contraseña'}
           </button>
         </form>
       </div>
