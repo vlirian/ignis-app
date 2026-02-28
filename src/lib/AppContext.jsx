@@ -14,6 +14,24 @@ const BV_UNITS = {
   7: [5, 8, 20],
 }
 
+function normalizeUnitId(raw) {
+  const n = Number(raw)
+  if (Number.isFinite(n)) return n
+  const match = String(raw || '').match(/\d+/)
+  return match ? Number(match[0]) : NaN
+}
+
+function normalizeZoneId(raw) {
+  const base = String(raw || '').trim().toLowerCase()
+  if (!base) return ''
+  if (base === 'cabina') return 'cabina'
+  if (base === 'techo') return 'techo'
+  if (base === 'trasera' || base === 'trasero') return 'trasera'
+  const cofreMatch = base.match(/^cofre[\s_-]*(\d+)$/)
+  if (cofreMatch) return `cofre${cofreMatch[1]}`
+  return base
+}
+
 function unitToBv(unitId) {
   const uid = Number(unitId)
   for (const [bv, units] of Object.entries(BV_UNITS)) {
@@ -32,6 +50,24 @@ function emptyState() {
       .forEach(z => { items[id][z.id] = [] })
   })
   return { configs, items }
+}
+
+async function fetchAllRows(table, buildQuery, pageSize = 1000) {
+  let from = 0
+  const rows = []
+
+  while (true) {
+    const to = from + pageSize - 1
+    const query = buildQuery(supabase.from(table)).range(from, to)
+    const { data, error } = await query
+    if (error) throw error
+    if (!data || data.length === 0) break
+    rows.push(...data)
+    if (data.length < pageSize) break
+    from += pageSize
+  }
+
+  return rows
 }
 
 export function AppProvider({ children }) {
@@ -90,9 +126,9 @@ export function AppProvider({ children }) {
         configs[row.unit_id] = { numCofres: row.num_cofres, hasTecho: row.has_techo, hasTrasera: row.has_trasera }
       })
 
-      const { data: itemData, error: itemErr } = await supabase
-        .from('unit_items').select('*').order('created_at', { ascending: true })
-      if (itemErr) throw itemErr
+      const itemData = await fetchAllRows('unit_items', (q) =>
+        q.select('*').order('created_at', { ascending: true })
+      )
 
       const items = {}
       UNIT_IDS.forEach(id => {
@@ -101,9 +137,12 @@ export function AppProvider({ children }) {
           .forEach(z => { items[id][z.id] = [] })
       })
       itemData.forEach(row => {
-        if (!items[row.unit_id]) return
-        if (!items[row.unit_id][row.zone_id]) items[row.unit_id][row.zone_id] = []
-        items[row.unit_id][row.zone_id].push({
+        const unitId = normalizeUnitId(row.unit_id)
+        const zoneId = normalizeZoneId(row.zone_id)
+        if (!Number.isFinite(unitId) || !zoneId) return
+        if (!items[unitId]) return
+        if (!items[unitId][zoneId]) items[unitId][zoneId] = []
+        items[unitId][zoneId].push({
           id: row.id, name: row.name, desc: row.description, qty: row.qty, min: row.min_qty
         })
       })
@@ -116,10 +155,9 @@ export function AppProvider({ children }) {
       setReviews(latestReviews)
 
       // Incidencias activas registradas en revisiones diarias (todas las fechas)
-      const { data: reportsWithIncidents } = await supabase
-        .from('revision_reports')
-        .select('*')
-        .not('incidents', 'is', null)
+      const reportsWithIncidents = await fetchAllRows('revision_reports', (q) =>
+        q.select('*').not('incidents', 'is', null).order('created_at', { ascending: true })
+      )
       const revInc = []
       if (reportsWithIncidents) {
         reportsWithIncidents.forEach(r => {
@@ -186,10 +224,9 @@ export function AppProvider({ children }) {
 
   // ── Revisión de unidad ────────────────────────────────
   const refreshRevisionIncidents = useCallback(async () => {
-    const { data } = await supabase
-      .from('revision_reports')
-      .select('*')
-      .not('incidents', 'is', null)
+    const data = await fetchAllRows('revision_reports', (q) =>
+      q.select('*').not('incidents', 'is', null).order('created_at', { ascending: true })
+    )
     const revInc = []
     if (data) {
       data.forEach(r => {
