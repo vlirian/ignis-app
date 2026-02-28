@@ -3,7 +3,7 @@ import { useApp } from '../lib/AppContext'
 import { supabase } from '../lib/supabase'
 
 export default function Administracion() {
-  const { isAdmin, session, revisionIncidents, clearAllIncidents, showToast, role } = useApp()
+  const { isAdmin, session, revisionIncidents, clearAllIncidents, showToast, role, refreshRevisionIncidents } = useApp()
   const [working, setWorking] = useState(false)
   const [requests, setRequests] = useState([])
   const [loadingRequests, setLoadingRequests] = useState(false)
@@ -15,6 +15,11 @@ export default function Administracion() {
   const [roleDrafts, setRoleDrafts] = useState({})
   const [roleActionLoading, setRoleActionLoading] = useState(false)
   const [newRoleForm, setNewRoleForm] = useState({ email: '', role: 'lector' })
+  const [reviewGroups, setReviewGroups] = useState([])
+  const [archivedReviewGroups, setArchivedReviewGroups] = useState([])
+  const [loadingReviewGroups, setLoadingReviewGroups] = useState(false)
+  const [reviewGroupsError, setReviewGroupsError] = useState('')
+  const [reviewActionLoading, setReviewActionLoading] = useState(false)
 
   const ROLE_OPTIONS = ['admin', 'operador', 'lector']
 
@@ -36,7 +41,28 @@ export default function Administracion() {
     if (!isAdmin) return
     loadRequests()
     loadRoles()
+    loadReviewGroups()
   }, [isAdmin])
+
+  function groupByDateAndBombero(rows = []) {
+    const map = {}
+    rows.forEach(r => {
+      const key = `${r.report_date}__${r.bombero_id}`
+      if (!map[key]) {
+        map[key] = {
+          key,
+          date: r.report_date,
+          bomberoId: r.bombero_id,
+          reports: [],
+        }
+      }
+      map[key].reports.push(r)
+    })
+    return Object.values(map).sort((a, b) => {
+      if (a.date === b.date) return a.bomberoId - b.bomberoId
+      return a.date < b.date ? 1 : -1
+    })
+  }
 
   async function loadRequests() {
     setLoadingRequests(true)
@@ -108,6 +134,128 @@ export default function Administracion() {
     setRoleDrafts(
       Object.fromEntries((data || []).map(r => [r.email, r.role]))
     )
+  }
+
+  async function loadReviewGroups() {
+    setLoadingReviewGroups(true)
+    setReviewGroupsError('')
+
+    const { data: activeData, error: activeErr } = await supabase
+      .from('revision_reports')
+      .select('id, report_date, bombero_id, unit_id, is_ok, incidents, general_notes, reviewed_by, created_at')
+      .order('report_date', { ascending: false })
+
+    if (activeErr) {
+      setLoadingReviewGroups(false)
+      setReviewGroupsError(activeErr.message || 'No se pudo cargar revisiones')
+      return
+    }
+
+    const { data: archivedData, error: archivedErr } = await supabase
+      .from('revision_reports_archive')
+      .select('id, original_id, report_date, bombero_id, unit_id, is_ok, incidents, general_notes, reviewed_by, created_at, deleted_at, deleted_by')
+      .order('deleted_at', { ascending: false })
+
+    setLoadingReviewGroups(false)
+    if (archivedErr) {
+      setReviewGroupsError(`Activas cargadas, pero falta archivo de restauración: ${archivedErr.message}`)
+      setReviewGroups(groupByDateAndBombero(activeData || []))
+      setArchivedReviewGroups([])
+      return
+    }
+
+    setReviewGroups(groupByDateAndBombero(activeData || []))
+    setArchivedReviewGroups(groupByDateAndBombero(archivedData || []))
+  }
+
+  async function archiveAndDeleteGroup(group) {
+    const ok = window.confirm(`Se borrarán las revisiones de BV${group.bomberoId} del ${group.date} y se moverán a archivo para poder restaurarlas. ¿Continuar?`)
+    if (!ok) return
+    const rows = group.reports || []
+    if (rows.length === 0) return
+
+    setReviewActionLoading(true)
+    const archivePayload = rows.map(r => ({
+      original_id: r.id,
+      report_date: r.report_date,
+      bombero_id: r.bombero_id,
+      unit_id: r.unit_id,
+      is_ok: r.is_ok,
+      incidents: r.incidents || [],
+      general_notes: r.general_notes || '',
+      reviewed_by: r.reviewed_by || null,
+      created_at: r.created_at || null,
+      deleted_by: session?.user?.email || null,
+    }))
+
+    const { error: archiveErr } = await supabase
+      .from('revision_reports_archive')
+      .insert(archivePayload)
+
+    if (archiveErr) {
+      setReviewActionLoading(false)
+      showToast(`No se pudo archivar antes de borrar: ${archiveErr.message || 'error'}`, 'error')
+      return
+    }
+
+    const ids = rows.map(r => r.id)
+    const { error: deleteErr } = await supabase
+      .from('revision_reports')
+      .delete()
+      .in('id', ids)
+
+    setReviewActionLoading(false)
+    if (deleteErr) {
+      showToast(`No se pudo borrar: ${deleteErr.message || 'error'}`, 'error')
+      return
+    }
+
+    showToast('Revisiones archivadas y borradas. Se deberán revisar de nuevo.', 'warn')
+    await refreshRevisionIncidents()
+    await loadReviewGroups()
+  }
+
+  async function restoreArchivedGroup(group) {
+    const ok = window.confirm(`Se restaurarán revisiones archivadas de BV${group.bomberoId} del ${group.date}. ¿Continuar?`)
+    if (!ok) return
+    const rows = group.reports || []
+    if (rows.length === 0) return
+
+    setReviewActionLoading(true)
+    for (const row of rows) {
+      const { error: upsertErr } = await supabase
+        .from('revision_reports')
+        .upsert({
+          report_date: row.report_date,
+          bombero_id: row.bombero_id,
+          unit_id: row.unit_id,
+          is_ok: row.is_ok,
+          incidents: row.incidents || [],
+          general_notes: row.general_notes || '',
+          reviewed_by: row.reviewed_by || null,
+        }, { onConflict: 'report_date,bombero_id,unit_id' })
+      if (upsertErr) {
+        setReviewActionLoading(false)
+        showToast(`No se pudo restaurar: ${upsertErr.message || 'error'}`, 'error')
+        return
+      }
+    }
+
+    const archiveIds = rows.map(r => r.id)
+    const { error: cleanErr } = await supabase
+      .from('revision_reports_archive')
+      .delete()
+      .in('id', archiveIds)
+
+    setReviewActionLoading(false)
+    if (cleanErr) {
+      showToast(`Restaurado, pero no se pudo limpiar archivo: ${cleanErr.message || 'error'}`, 'warn')
+    } else {
+      showToast('Revisiones restauradas correctamente', 'ok')
+    }
+
+    await refreshRevisionIncidents()
+    await loadReviewGroups()
   }
 
   async function saveRoleForEmail(email) {
@@ -303,6 +451,96 @@ export default function Administracion() {
               </tbody>
             </table>
           </div>
+        )}
+      </div>
+
+      <div className="card" style={{ padding: 20, marginTop: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--mid)', letterSpacing: 1.5, textTransform: 'uppercase', fontWeight: 700 }}>
+              Revisiones diarias
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--light)', marginTop: 6 }}>
+              Puedes borrar bloques de revisión para forzar nueva revisión. Se guardan en archivo para poder restaurarlas.
+            </div>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={loadReviewGroups}>↻ Recargar</button>
+        </div>
+
+        {loadingReviewGroups ? (
+          <div style={{ color: 'var(--mid)', fontSize: 13 }}>Cargando revisiones...</div>
+        ) : reviewGroupsError ? (
+          <div style={{ color: 'var(--red-l)', fontSize: 13 }}>
+            {reviewGroupsError}. Ejecuta `roles-permissions.sql` y crea también `revision_reports_archive`.
+          </div>
+        ) : (
+          <>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: 'var(--mid)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: 700 }}>
+                Revisiones activas
+              </div>
+              {reviewGroups.length === 0 ? (
+                <div style={{ color: 'var(--mid)', fontSize: 13 }}>No hay revisiones activas.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {reviewGroups.map(g => (
+                    <div key={`active-${g.key}`} className="card" style={{ padding: 10, background: 'var(--panel)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                        <div>
+                          <div style={{ fontFamily: 'Barlow Condensed', fontSize: 18, fontWeight: 800 }}>
+                            BV{g.bomberoId} · {new Date(g.date + 'T12:00:00').toLocaleDateString('es-ES')}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--mid)' }}>
+                            {g.reports.length} unidad(es) · {g.reports.reduce((acc, r) => acc + (r.incidents?.length || 0), 0)} incidencia(s)
+                          </div>
+                        </div>
+                        <button
+                          className="btn btn-danger btn-sm"
+                          disabled={reviewActionLoading}
+                          onClick={() => archiveAndDeleteGroup(g)}
+                        >
+                          Borrar (archivar)
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--mid)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: 700 }}>
+                Archivo (restaurables)
+              </div>
+              {archivedReviewGroups.length === 0 ? (
+                <div style={{ color: 'var(--mid)', fontSize: 13 }}>No hay revisiones archivadas.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {archivedReviewGroups.map(g => (
+                    <div key={`arch-${g.key}`} className="card" style={{ padding: 10, background: 'var(--panel)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                        <div>
+                          <div style={{ fontFamily: 'Barlow Condensed', fontSize: 18, fontWeight: 800 }}>
+                            BV{g.bomberoId} · {new Date(g.date + 'T12:00:00').toLocaleDateString('es-ES')}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--mid)' }}>
+                            {g.reports.length} unidad(es) archivadas
+                          </div>
+                        </div>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          disabled={reviewActionLoading}
+                          onClick={() => restoreArchivedGroup(g)}
+                        >
+                          Restaurar
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
 
