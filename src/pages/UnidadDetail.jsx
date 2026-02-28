@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useApp } from '../lib/AppContext'
 import { buildZones, zoneStatus, unitSummary, unitAlertLevel } from '../data/units'
@@ -32,6 +32,10 @@ export default function UnidadDetail() {
 
   const cfg = configs[unitId]
   const zones = buildZones(cfg.numCofres, cfg.hasTecho, cfg.hasTrasera)
+  const extraZones = Object.keys(items[unitId] || {})
+    .filter(zoneId => !zones.some(z => z.id === zoneId))
+    .map(zoneId => ({ id: zoneId, label: `Zona SQL: ${zoneId}`, icon: '🧩', extra: true }))
+  const allZones = [...zones, ...extraZones]
   const summary = unitSummary(items[unitId], zones)
   const level = unitAlertLevel(items[unitId], zones)
   // itemStates for this unit from global context + incidencias creadas en revisión diaria
@@ -97,7 +101,11 @@ export default function UnidadDetail() {
     setCfgModal(true)
   }
 
-  const zonesToShow = selectedZone ? zones.filter(z => z.id === selectedZone) : zones
+  useEffect(() => {
+    setSelectedZone(null)
+  }, [unitId])
+
+  const zonesToShow = selectedZone ? allZones.filter(z => z.id === selectedZone) : allZones
 
   return (
     <div className="animate-in page-container">
@@ -123,7 +131,7 @@ export default function UnidadDetail() {
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-ghost btn-sm" onClick={openCfg}>⚙ Configurar</button>
           <button className="btn btn-ghost btn-sm" onClick={() => setReviewModal(true)}>✔ Revisar unidad</button>
-          <button className="btn btn-primary btn-sm" onClick={() => setAddModal(zones[0]?.id)}>＋ Añadir artículo</button>
+            <button className="btn btn-primary btn-sm" onClick={() => setAddModal(zones[0]?.id || allZones[0]?.id)}>＋ Añadir artículo</button>
         </div>
       </div>
 
@@ -233,7 +241,7 @@ export default function UnidadDetail() {
           <div className="form-group">
             <label className="form-label">Zona</label>
             <select className="form-select" value={addModal} onChange={e => setAddModal(e.target.value)}>
-              {zones.map(z => <option key={z.id} value={z.id}>{z.label}</option>)}
+              {allZones.map(z => <option key={z.id} value={z.id}>{z.label}</option>)}
             </select>
           </div>
           <div className="form-group">
