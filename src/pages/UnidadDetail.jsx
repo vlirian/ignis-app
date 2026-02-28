@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useParams, useNavigate, useLocation, useBlocker } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useApp } from '../lib/AppContext'
 import { buildZones, zoneStatus, unitSummary, unitAlertLevel } from '../data/units'
 import Modal from '../components/Modal'
@@ -30,7 +30,6 @@ export default function UnidadDetail() {
   const [focusedItemId, setFocusedItemId] = useState(null)
   const [newItem, setNewItem] = useState({ name: '', desc: '', qty: 1, min: 1 })
   const [cfgForm, setCfgForm] = useState(null)
-  const blocker = useBlocker(hasLocalIncidenceEdits)
 
   if (!configs[unitId]) {
     return <div style={{ padding: 40, color: 'var(--mid)' }}>Unidad no encontrada.</div>
@@ -171,13 +170,6 @@ export default function UnidadDetail() {
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [hasLocalIncidenceEdits])
-
-  useEffect(() => {
-    if (blocker.state !== 'blocked') return
-    const ok = window.confirm('Tienes cambios de incidencias sin guardar. ¿Seguro que quieres salir?')
-    if (ok) blocker.proceed()
-    else blocker.reset()
-  }, [blocker])
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)

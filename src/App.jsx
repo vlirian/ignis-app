@@ -17,7 +17,8 @@ import Administracion from './pages/Administracion'
 import { EPI, Herramientas, Sanitario, Mantenimiento, Turnos } from './pages/Placeholders'
 
 const PAGE_TITLES = {
-  '/':              'Panel General',
+  '/':              'Revisión Diaria',
+  '/panel':         'Panel General',
   '/alertas':       'Alertas',
   '/unidades':      'Unidades',
   '/revision':      'Revisión Diaria',
@@ -91,7 +92,8 @@ function AppInner() {
         </div>
 
         <Routes>
-          <Route path="/"              element={<Dashboard />} />
+          <Route path="/"              element={<Revision />} />
+          <Route path="/panel"         element={<Dashboard />} />
           <Route path="/alertas"       element={<Alertas />} />
           <Route path="/unidades"      element={<UnidadesList />} />
           <Route path="/unidades/:id"  element={<UnidadDetail />} />

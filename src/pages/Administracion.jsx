@@ -20,6 +20,14 @@ export default function Administracion() {
   const [loadingReviewGroups, setLoadingReviewGroups] = useState(false)
   const [reviewGroupsError, setReviewGroupsError] = useState('')
   const [reviewActionLoading, setReviewActionLoading] = useState(false)
+  const [accessLogs, setAccessLogs] = useState([])
+  const [loadingAccessLogs, setLoadingAccessLogs] = useState(false)
+  const [accessLogsError, setAccessLogsError] = useState('')
+  const [incidentRecipients, setIncidentRecipients] = useState([])
+  const [loadingIncidentRecipients, setLoadingIncidentRecipients] = useState(false)
+  const [incidentRecipientsError, setIncidentRecipientsError] = useState('')
+  const [incidentRecipientDraft, setIncidentRecipientDraft] = useState('estudiovic@gmail.com')
+  const [incidentRecipientSaving, setIncidentRecipientSaving] = useState(false)
 
   const ROLE_OPTIONS = ['admin', 'operador', 'lector']
 
@@ -42,6 +50,8 @@ export default function Administracion() {
     loadRequests()
     loadRoles()
     loadReviewGroups()
+    loadAccessLogs()
+    loadIncidentRecipients()
   }, [isAdmin])
 
   function groupByDateAndBombero(rows = []) {
@@ -134,6 +144,73 @@ export default function Administracion() {
     setRoleDrafts(
       Object.fromEntries((data || []).map(r => [r.email, r.role]))
     )
+  }
+
+  async function loadAccessLogs() {
+    setLoadingAccessLogs(true)
+    setAccessLogsError('')
+    const { data, error } = await supabase
+      .from('access_logs')
+      .select('id, created_at, event_type, email, user_id, user_agent, metadata')
+      .order('created_at', { ascending: false })
+      .limit(300)
+    setLoadingAccessLogs(false)
+    if (error) {
+      setAccessLogsError(error.message || 'No se pudo cargar el registro de accesos')
+      return
+    }
+    setAccessLogs(data || [])
+  }
+
+  async function loadIncidentRecipients() {
+    setLoadingIncidentRecipients(true)
+    setIncidentRecipientsError('')
+    const { data, error } = await supabase
+      .from('incident_email_recipients')
+      .select('email, enabled, updated_at')
+      .order('email', { ascending: true })
+    setLoadingIncidentRecipients(false)
+    if (error) {
+      setIncidentRecipientsError(error.message || 'No se pudo cargar destinatarios')
+      return
+    }
+    const rows = data || []
+    setIncidentRecipients(rows)
+    const firstEnabled = rows.find(r => r.enabled)
+    setIncidentRecipientDraft(firstEnabled?.email || rows[0]?.email || 'estudiovic@gmail.com')
+  }
+
+  async function saveIncidentRecipient() {
+    const email = String(incidentRecipientDraft || '').trim().toLowerCase()
+    if (!email) {
+      showToast('Indica un email de destinatario', 'warn')
+      return
+    }
+    setIncidentRecipientSaving(true)
+    // Desactivar todos y activar solo el seleccionado
+    const { error: disableErr } = await supabase
+      .from('incident_email_recipients')
+      .update({ enabled: false })
+      .neq('email', '')
+    if (disableErr) {
+      setIncidentRecipientSaving(false)
+      showToast(`No se pudo actualizar destinatario: ${disableErr.message || 'error'}`, 'error')
+      return
+    }
+    const { error: upsertErr } = await supabase
+      .from('incident_email_recipients')
+      .upsert({
+        email,
+        enabled: true,
+        updated_by: session?.user?.email || null,
+      }, { onConflict: 'email' })
+    setIncidentRecipientSaving(false)
+    if (upsertErr) {
+      showToast(`No se pudo guardar destinatario: ${upsertErr.message || 'error'}`, 'error')
+      return
+    }
+    showToast('Destinatario de incidencias guardado', 'ok')
+    await loadIncidentRecipients()
   }
 
   async function loadReviewGroups() {
@@ -450,6 +527,115 @@ export default function Administracion() {
                           Rechazar
                         </button>
                       </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={{ padding: 20, marginTop: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--mid)', letterSpacing: 1.5, textTransform: 'uppercase', fontWeight: 700 }}>
+              Notificación de incidencias por email
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--light)', marginTop: 6 }}>
+              Cuando un bombero finaliza la revisión y hay incidencias, se envía un aviso al correo activo.
+            </div>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={loadIncidentRecipients}>↻ Recargar</button>
+        </div>
+
+        {loadingIncidentRecipients ? (
+          <div style={{ color: 'var(--mid)', fontSize: 13 }}>Cargando destinatarios...</div>
+        ) : incidentRecipientsError ? (
+          <div style={{ color: 'var(--red-l)', fontSize: 13 }}>
+            Error: {incidentRecipientsError}. Ejecuta `incident-email-notifications.sql` y despliega la función `send-review-incidents-email`.
+          </div>
+        ) : (
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'end', marginBottom: 10 }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Email administrador destinatario</label>
+                <input
+                  className="form-input"
+                  type="email"
+                  value={incidentRecipientDraft}
+                  onChange={e => setIncidentRecipientDraft(e.target.value)}
+                  placeholder="admin@dominio.com"
+                />
+              </div>
+              <button className="btn btn-primary btn-sm" onClick={saveIncidentRecipient} disabled={incidentRecipientSaving}>
+                {incidentRecipientSaving ? 'Guardando...' : 'Guardar destinatario'}
+              </button>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--mid)' }}>
+              Activo ahora:{' '}
+              <strong style={{ color: 'var(--light)' }}>
+                {(incidentRecipients.find(r => r.enabled)?.email) || 'estudiovic@gmail.com'}
+              </strong>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={{ padding: 20, marginTop: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--mid)', letterSpacing: 1.5, textTransform: 'uppercase', fontWeight: 700 }}>
+              Registro de accesos
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--light)', marginTop: 6 }}>
+              Auditoría de entradas/salidas de sesión. Solo visible para administradores.
+            </div>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={loadAccessLogs}>↻ Recargar</button>
+        </div>
+
+        {loadingAccessLogs ? (
+          <div style={{ color: 'var(--mid)', fontSize: 13 }}>Cargando accesos...</div>
+        ) : accessLogsError ? (
+          <div style={{ color: 'var(--red-l)', fontSize: 13 }}>
+            Error: {accessLogsError}. Ejecuta `access-logs.sql` en Supabase.
+          </div>
+        ) : accessLogs.length === 0 ? (
+          <div style={{ color: 'var(--mid)', fontSize: 13 }}>No hay eventos de acceso aún.</div>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Evento</th>
+                  <th>Email</th>
+                  <th>Ruta</th>
+                  <th>Navegador</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accessLogs.map(row => (
+                  <tr key={row.id}>
+                    <td style={{ fontSize: 12, color: 'var(--mid)' }}>
+                      {row.created_at ? new Date(row.created_at).toLocaleString('es-ES') : '—'}
+                    </td>
+                    <td>
+                      <span className={`chip ${
+                        row.event_type === 'login' ? 'chip-ok'
+                          : row.event_type === 'logout' ? 'chip-warn'
+                            : 'chip-gray'
+                      }`}>
+                        {row.event_type || 'evento'}
+                      </span>
+                    </td>
+                    <td>{row.email || '—'}</td>
+                    <td style={{ fontSize: 12, color: 'var(--mid)' }}>
+                      {row?.metadata?.path || '—'}
+                    </td>
+                    <td style={{ maxWidth: 340, fontSize: 11, color: 'var(--mid)', whiteSpace: 'normal' }}>
+                      {row.user_agent || '—'}
                     </td>
                   </tr>
                 ))}

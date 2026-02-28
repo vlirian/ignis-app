@@ -2,7 +2,31 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../lib/AppContext'
 
+const PHOTO_NOTES_MARKER = '[[FOTOS_REVISION]]'
+
+function parseNotesAndPhotoUrls(raw = '') {
+  const txt = String(raw || '')
+  const markerPos = txt.indexOf(PHOTO_NOTES_MARKER)
+  if (markerPos === -1) return { notes: txt, photoUrls: [] }
+  const notes = txt.slice(0, markerPos).trimEnd()
+  const after = txt.slice(markerPos + PHOTO_NOTES_MARKER.length)
+  const photoUrls = after
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .filter(s => /^https?:\/\//i.test(s) || /^data:image\//i.test(s))
+  return { notes, photoUrls }
+}
+
+function composeNotesWithPhotoUrls(notes = '', photoUrls = []) {
+  const cleanNotes = String(notes || '').trim()
+  const cleanUrls = (photoUrls || []).map(s => String(s || '').trim()).filter(Boolean)
+  if (cleanUrls.length === 0) return cleanNotes
+  return `${cleanNotes}${cleanNotes ? '\n\n' : ''}${PHOTO_NOTES_MARKER}\n${cleanUrls.join('\n')}`
+}
+
 function emptyEditState(report) {
+  const parsed = parseNotesAndPhotoUrls(report.general_notes || '')
   return {
     id: report.id,
     unit_id: report.unit_id,
@@ -10,7 +34,8 @@ function emptyEditState(report) {
     report_date: report.report_date,
     reviewed_by: report.reviewed_by || '',
     is_ok: !!report.is_ok,
-    general_notes: report.general_notes || '',
+    general_notes: parsed.notes || '',
+    photoUrls: parsed.photoUrls || [],
     incidents: Array.isArray(report.incidents) ? report.incidents.map(i => ({
       zone: i?.zone || '',
       item: i?.item || '',
@@ -26,7 +51,7 @@ function fmtDate(dateStr) {
 }
 
 export default function RegistrosDiarios() {
-  const { showToast, refreshRevisionIncidents } = useApp()
+  const { showToast, refreshRevisionIncidents, isAdmin } = useApp()
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -36,6 +61,8 @@ export default function RegistrosDiarios() {
   const [unitOrder, setUnitOrder] = useState('asc')
   const [editState, setEditState] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [deletingAll, setDeletingAll] = useState(false)
+  const [photoViewer, setPhotoViewer] = useState(null) // { urls: string[], index: number, title?: string }
 
   useEffect(() => { loadReports() }, [])
 
@@ -66,7 +93,8 @@ export default function RegistrosDiarios() {
       setLoading(false)
       return
     }
-    setReports(data || [])
+    const visibleReports = (data || []).filter(r => r.reviewed_by !== 'unidades')
+    setReports(visibleReports)
     setLoading(false)
   }
 
@@ -98,7 +126,7 @@ export default function RegistrosDiarios() {
     setSaving(true)
     const payload = {
       is_ok: editState.is_ok,
-      general_notes: editState.general_notes || '',
+      general_notes: composeNotesWithPhotoUrls(editState.general_notes || '', editState.photoUrls || []),
       incidents: editState.incidents
         .filter(i => i.item.trim())
         .map(i => ({ zone: i.zone || '', item: i.item.trim(), note: i.note || '' })),
@@ -142,6 +170,71 @@ export default function RegistrosDiarios() {
     await refreshRevisionIncidents()
   }
 
+  async function deleteAllReports() {
+    if (!isAdmin) return
+    const ok = window.confirm('¿Borrar TODOS los informes de revisión? Esta acción no se puede deshacer.')
+    if (!ok) return
+    setDeletingAll(true)
+    try {
+      // Ruta principal: RPC server-side (evita límites del cliente y problemas de lotes).
+      const { data: rpcDeleted, error: rpcErr } = await supabase.rpc('admin_clear_revision_reports')
+      let usedFallback = false
+
+      // Fallback por si no existe la función aún en Supabase.
+      if (rpcErr) {
+        usedFallback = true
+        const batchSize = 500
+        for (let i = 0; i < 40; i++) {
+          const { data: batch, error: fetchErr } = await supabase
+            .from('revision_reports')
+            .select('id')
+            .or('reviewed_by.is.null,reviewed_by.neq.unidades')
+            .limit(batchSize)
+          if (fetchErr) throw fetchErr
+          const ids = (batch || []).map(r => r.id).filter(Boolean)
+          if (ids.length === 0) break
+          const { error: delErr } = await supabase
+            .from('revision_reports')
+            .delete()
+            .in('id', ids)
+          if (delErr) throw delErr
+        }
+      }
+
+      // Verificación final: no debe quedar nada visible.
+      const { count: stillVisible, error: verifyErr } = await supabase
+        .from('revision_reports')
+        .select('id', { count: 'exact', head: true })
+        .or('reviewed_by.is.null,reviewed_by.neq.unidades')
+      if (verifyErr) throw verifyErr
+      if (stillVisible > 0) {
+        showToast(`No se limpiaron todos los informes (${stillVisible} restantes)`, 'error')
+      } else {
+        const msg = usedFallback
+          ? 'Todos los informes borrados (modo compatible)'
+          : `Todos los informes han sido borrados (${Number(rpcDeleted || 0)})`
+        showToast(msg, 'warn')
+      }
+
+      setDateFilter('')
+      setBvFilter('')
+      setReports([])
+    } catch (err) {
+      const msg = err?.message || 'desconocido'
+      showToast(`No se pudo borrar todo: ${msg}`, 'error')
+    } finally {
+      setDeletingAll(false)
+      await loadReports()
+      await refreshRevisionIncidents()
+    }
+  }
+
+  function openPhotoViewer(urls = [], title = 'Foto') {
+    const clean = (urls || []).filter(Boolean)
+    if (!clean.length) return
+    setPhotoViewer({ urls: clean, index: 0, title })
+  }
+
   return (
     <div className="animate-in page-container">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
@@ -149,7 +242,14 @@ export default function RegistrosDiarios() {
           <div style={{ fontFamily: 'Barlow Condensed', fontSize: 28, fontWeight: 900, letterSpacing: 1 }}>🗂️ Registros diarios</div>
           <div style={{ fontSize: 12, color: 'var(--mid)', marginTop: 3 }}>Informes guardados por fecha y bombero. Puedes editar o borrar.</div>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={loadReports}>↻ Recargar</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="btn btn-ghost btn-sm" onClick={loadReports}>↻ Recargar</button>
+          {isAdmin && (
+            <button className="btn btn-danger btn-sm" onClick={deleteAllReports} disabled={deletingAll}>
+              {deletingAll ? 'Borrando...' : 'Borrar todo'}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="card" style={{ padding: 14, marginBottom: 16 }}>
@@ -215,6 +315,7 @@ export default function RegistrosDiarios() {
                       <th>Unidad</th>
                       <th>Estado</th>
                       <th>Incidencias</th>
+                      <th>Fotos</th>
                       <th>Revisado por</th>
                       <th></th>
                     </tr>
@@ -229,6 +330,20 @@ export default function RegistrosDiarios() {
                           <span className={`chip ${r.is_ok ? 'chip-ok' : 'chip-alert'}`}>{r.is_ok ? '✔ Correcto' : '⚠ Incidencias'}</span>
                         </td>
                         <td>{r.incidents?.length || 0}</td>
+                        <td>
+                          {(() => {
+                            const urls = parseNotesAndPhotoUrls(r.general_notes || '').photoUrls
+                            if (!urls.length) return 0
+                            return (
+                              <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => openPhotoViewer(urls, `BV${r.bombero_id} · U${String(r.unit_id).padStart(2, '0')}`)}
+                              >
+                                Ver ({urls.length})
+                              </button>
+                            )
+                          })()}
+                        </td>
                         <td style={{ fontSize: 12, color: 'var(--mid)' }}>{r.reviewed_by || '—'}</td>
                         <td className="reg-row-actions" style={{ display: 'flex', gap: 6 }}>
                           <button className="btn btn-ghost btn-sm" onClick={() => setEditState(emptyEditState(r))}>Editar</button>
@@ -245,7 +360,7 @@ export default function RegistrosDiarios() {
       )}
 
       {editState && (
-        <div onClick={e => { if (e.target === e.currentTarget) setEditState(null) }} className="modal-overlay">
+        <div onClick={e => { if (e.target === e.currentTarget) setEditState(null) }} className="modal-overlay" style={{ alignItems: 'center', paddingTop: 20 }}>
           <div className="modal" style={{ maxWidth: 760 }}>
             <div className="modal-header">
               <div className="modal-title">Editar informe · BV{editState.bombero_id} · U{String(editState.unit_id).padStart(2, '0')}</div>
@@ -303,10 +418,75 @@ export default function RegistrosDiarios() {
                 <label className="form-label">Observaciones</label>
                 <textarea className="form-input" style={{ minHeight: 100, resize: 'vertical', fontFamily: 'Barlow' }} value={editState.general_notes} onChange={e => setEditState(p => ({ ...p, general_notes: e.target.value }))} />
               </div>
+              {(editState.photoUrls || []).length > 0 && (
+                <div className="form-group" style={{ marginTop: 10, marginBottom: 0 }}>
+                  <label className="form-label">Fotos adjuntas</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(84px,1fr))', gap: 8 }}>
+                    {(editState.photoUrls || []).map((url, idx) => (
+                      <div key={`photo-${idx}`} style={{ position: 'relative', border: '1px solid var(--border2)', borderRadius: 6, overflow: 'hidden' }}>
+                        <button
+                          onClick={() => openPhotoViewer(editState.photoUrls || [], `BV${editState.bombero_id} · U${String(editState.unit_id).padStart(2, '0')}`)}
+                          title="Ver foto"
+                          style={{ all: 'unset', cursor: 'zoom-in', display: 'block', width: '100%' }}
+                        >
+                          <img src={url} alt={`Foto ${idx + 1}`} style={{ width: '100%', height: 66, objectFit: 'cover', display: 'block' }} />
+                        </button>
+                        <button
+                          className="btn-icon"
+                          style={{ position: 'absolute', top: 4, right: 4, width: 20, height: 20, fontSize: 11, background: 'rgba(0,0,0,0.65)' }}
+                          onClick={() => setEditState(p => ({ ...p, photoUrls: (p.photoUrls || []).filter((_, i) => i !== idx) }))}
+                          title="Quitar foto"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div className="modal-footer">
               <button className="btn btn-ghost btn-sm" onClick={() => setEditState(null)}>Cancelar</button>
               <button className="btn btn-primary btn-sm" onClick={saveEdit} disabled={saving}>{saving ? 'Guardando...' : 'Guardar cambios'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {photoViewer && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setPhotoViewer(null) }}
+          style={{ position: 'fixed', inset: 0, zIndex: 260, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 20, paddingTop: 20 }}
+        >
+          <div style={{ width: '100%', maxWidth: 1100 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <div style={{ color: 'var(--light)', fontFamily: 'Barlow Condensed', fontSize: 20 }}>{photoViewer.title || 'Foto de revisión'}</div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setPhotoViewer(null)}>Cerrar</button>
+            </div>
+            <div style={{ position: 'relative', border: '1px solid var(--border2)', borderRadius: 12, overflow: 'hidden', background: '#111' }}>
+              <img
+                src={photoViewer.urls[photoViewer.index]}
+                alt={`Foto ${photoViewer.index + 1}`}
+                style={{ width: '100%', maxHeight: '76vh', objectFit: 'contain', display: 'block', margin: '0 auto' }}
+              />
+              {photoViewer.urls.length > 1 && (
+                <>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', background: 'rgba(0,0,0,0.6)' }}
+                    onClick={() => setPhotoViewer(v => ({ ...v, index: (v.index - 1 + v.urls.length) % v.urls.length }))}
+                  >
+                    ‹
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'rgba(0,0,0,0.6)' }}
+                    onClick={() => setPhotoViewer(v => ({ ...v, index: (v.index + 1) % v.urls.length }))}
+                  >
+                    ›
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

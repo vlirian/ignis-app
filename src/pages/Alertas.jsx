@@ -7,6 +7,7 @@ export default function Alertas() {
   const { configs, items, revisionIncidents } = useApp()
   const navigate = useNavigate()
   const [sortMode, setSortMode] = useState('fecha_desc')
+  const [photoViewer, setPhotoViewer] = useState(null) // { urls: string[], index: number, title?: string }
 
   const goToUnitFromAlert = (alert) => {
     const params = new URLSearchParams()
@@ -46,6 +47,7 @@ export default function Alertas() {
     bomberoId: inc.bomberoId,
     source: 'revision',
     reportDate: inc.reportDate || null,
+    photoUrls: Array.isArray(inc.photoUrls) ? inc.photoUrls : [],
   }))
 
   const issueMap = new Map()
@@ -53,6 +55,22 @@ export default function Alertas() {
     const key = `${inc.unitId}|${String(inc.zone).trim().toLowerCase()}|${String(inc.item).trim().toLowerCase()}`
     if (!issueMap.has(key)) issueMap.set(key, inc)
   })
+
+  const openIssuePhoto = (alert) => {
+    const urls = (alert.photoUrls || []).filter(Boolean)
+    if (!urls.length) return
+    setPhotoViewer({ urls, index: 0, title: `U${String(alert.unitId).padStart(2, '0')} · ${alert.item}` })
+  }
+
+  const onIssueRowClick = (alert) => {
+    const hasPhoto = (alert.photoUrls || []).length > 0
+    if (hasPhoto) {
+      openIssuePhoto(alert)
+      return
+    }
+    goToUnitFromAlert(alert)
+  }
+
   const issueAlerts = useMemo(() => {
     const list = Array.from(issueMap.values())
     const sorted = [...list].sort((a, b) => {
@@ -151,7 +169,7 @@ export default function Alertas() {
                     <tr
                       key={i}
                       style={{ background: i % 2 === 0 ? 'rgba(230,126,34,0.03)' : 'transparent', cursor: 'pointer' }}
-                      onClick={() => goToUnitFromAlert(a)}
+                      onClick={() => onIssueRowClick(a)}
                     >
                       <td>
                         <span style={{ fontFamily: 'Barlow Condensed', fontSize: 16, fontWeight: 800, color: '#e67e22' }}>
@@ -182,9 +200,22 @@ export default function Alertas() {
                           : 'Sin fecha'}
                       </td>
                       <td>
-                        <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); goToUnitFromAlert(a) }}>
-                          Ver unidad
-                        </button>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {(a.photoUrls || []).length > 0 ? (
+                            <>
+                              <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); openIssuePhoto(a) }}>
+                                Ver foto
+                              </button>
+                              <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); goToUnitFromAlert(a) }}>
+                                Ir unidad
+                              </button>
+                            </>
+                          ) : (
+                            <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); goToUnitFromAlert(a) }}>
+                              Ver unidad
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -240,6 +271,47 @@ export default function Alertas() {
             </div>
           )}
 
+        </div>
+      )}
+
+      {photoViewer && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setPhotoViewer(null) }}
+          style={{ position: 'fixed', inset: 0, zIndex: 260, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 20, paddingTop: 20 }}
+        >
+          <div style={{ width: '100%', maxWidth: 1100 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <div style={{ color: 'var(--light)', fontFamily: 'Barlow Condensed', fontSize: 20, letterSpacing: 0.5 }}>
+                {photoViewer.title || 'Foto de incidencia'}
+              </div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setPhotoViewer(null)}>Cerrar</button>
+            </div>
+            <div style={{ position: 'relative', border: '1px solid var(--border2)', borderRadius: 12, overflow: 'hidden', background: '#111' }}>
+              <img
+                src={photoViewer.urls[photoViewer.index]}
+                alt={`Foto ${photoViewer.index + 1}`}
+                style={{ width: '100%', maxHeight: '76vh', objectFit: 'contain', display: 'block', margin: '0 auto' }}
+              />
+              {photoViewer.urls.length > 1 && (
+                <>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', background: 'rgba(0,0,0,0.6)' }}
+                    onClick={() => setPhotoViewer(v => ({ ...v, index: (v.index - 1 + v.urls.length) % v.urls.length }))}
+                  >
+                    ‹
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'rgba(0,0,0,0.6)' }}
+                    onClick={() => setPhotoViewer(v => ({ ...v, index: (v.index + 1) % v.urls.length }))}
+                  >
+                    ›
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

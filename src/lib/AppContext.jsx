@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 import { UNIT_IDS, defaultUnitConfig, buildZones } from '../data/units'
 
@@ -9,6 +9,7 @@ const ROLE_PERMISSIONS = {
   operador: ['view', 'edit'],
   lector: ['view'],
 }
+const PHOTO_NOTES_MARKER = '[[FOTOS_REVISION]]'
 const BV_UNITS = {
   1: [3, 7, 19],
   2: [0, 6, 14],
@@ -35,6 +36,20 @@ function normalizeZoneId(raw) {
   const cofreMatch = base.match(/^cofre[\s_-]*(\d+)$/)
   if (cofreMatch) return `cofre${cofreMatch[1]}`
   return base
+}
+
+function parseNotesAndPhotoUrls(raw = '') {
+  const txt = String(raw || '')
+  const markerPos = txt.indexOf(PHOTO_NOTES_MARKER)
+  if (markerPos === -1) return { notes: txt, photoUrls: [] }
+  const notes = txt.slice(0, markerPos).trimEnd()
+  const after = txt.slice(markerPos + PHOTO_NOTES_MARKER.length)
+  const photoUrls = after
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .filter(s => /^https?:\/\//i.test(s) || /^data:image\//i.test(s))
+  return { notes, photoUrls }
 }
 
 function unitToBv(unitId) {
@@ -86,10 +101,38 @@ export function AppProvider({ children }) {
   const [itemStates, setItemStates] = useState({})
   const [revisionIncidents, setRevisionIncidents] = useState([])  // incidencias de informes BV de hoy
   const [userRole, setUserRole] = useState('lector')
+  const loggedSessionIds = useRef(new Set())
   const currentEmail = (session?.user?.email || '').trim().toLowerCase()
   const effectiveRole = userRole || (ADMIN_EMAILS.includes(currentEmail) ? 'admin' : 'lector')
   const isAdmin = effectiveRole === 'admin' || ADMIN_EMAILS.includes(currentEmail)
   const todayDate = new Date().toISOString().slice(0, 10)
+
+  const logAccessEvent = useCallback(async (type, sessionData = null, extra = {}) => {
+    try {
+      const s = sessionData || session
+      const user = s?.user || null
+      const email = (user?.email || '').trim().toLowerCase() || null
+      const userId = user?.id || null
+      if (!userId && !email) return
+
+      const payload = {
+        event_type: type,
+        email,
+        user_id: userId,
+        user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
+        metadata: {
+          path: typeof window !== 'undefined' ? window.location.pathname : null,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+          ...extra,
+        },
+      }
+
+      await supabase.from('access_logs').insert(payload)
+    } catch (e) {
+      // No romper flujo de auth por fallo en auditoría
+      console.warn('No se pudo registrar access_log:', e?.message || e)
+    }
+  }, [session])
 
   // ── Auth ──────────────────────────────────────────────
   useEffect(() => {
@@ -100,13 +143,26 @@ export function AppProvider({ children }) {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       setAuthReady(true)
+      // Si hay sesión existente al cargar, registrar una única vez por session_id
+      const sid = session?.access_token || ''
+      if (sid && !loggedSessionIds.current.has(sid)) {
+        loggedSessionIds.current.add(sid)
+        logAccessEvent('session_resume', session)
+      }
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY') setRecovering(true)
+      if (event === 'SIGNED_IN') {
+        const sid = session?.access_token || ''
+        if (sid && !loggedSessionIds.current.has(sid)) {
+          loggedSessionIds.current.add(sid)
+          logAccessEvent('login', session)
+        }
+      }
       setSession(session)
     })
     return () => subscription.unsubscribe()
-  }, [])
+  }, [logAccessEvent])
 
   const finishRecovery = useCallback(() => {
     setRecovering(false)
@@ -184,6 +240,7 @@ export function AppProvider({ children }) {
       const revInc = []
       if (reportsWithIncidents) {
         reportsWithIncidents.forEach(r => {
+          const photos = parseNotesAndPhotoUrls(r.general_notes || '').photoUrls || []
           ;(r.incidents || []).forEach(inc => {
             if (!inc?.item) return
             revInc.push({
@@ -195,6 +252,7 @@ export function AppProvider({ children }) {
               itemId: inc.itemId || null,
               bomberoId: r.bombero_id,
               reportDate: r.report_date || null,
+              photoUrls: photos,
             })
           })
         })
@@ -239,12 +297,13 @@ export function AppProvider({ children }) {
 
   // ── Logout ────────────────────────────────────────────
   const logout = useCallback(async () => {
+    await logAccessEvent('logout')
     await supabase.auth.signOut()
     setState(emptyState())
     setReviews({})
     setItemStates({})
     setUserRole('lector')
-  }, [])
+  }, [logAccessEvent])
 
   const hasPermission = useCallback((permission) => {
     if (isAdmin) return true
@@ -260,6 +319,7 @@ export function AppProvider({ children }) {
     const revInc = []
     if (data) {
       data.forEach(r => {
+        const photos = parseNotesAndPhotoUrls(r.general_notes || '').photoUrls || []
         ;(r.incidents || []).forEach(inc => {
           if (!inc?.item) return
           revInc.push({
@@ -271,6 +331,7 @@ export function AppProvider({ children }) {
             itemId: inc.itemId || null,
             bomberoId: r.bombero_id,
             reportDate: r.report_date || null,
+            photoUrls: photos,
           })
         })
       })

@@ -73,6 +73,10 @@
 
 .navIcon { font-size: 17px; width: 20px; text-align: center; }
 .navLabel { flex: 1; }
+.alertPulse {
+  animation: alertBlink 1.15s ease-in-out infinite;
+  transform-origin: center;
+}
 
 .badge {
   background: var(--fire);
@@ -83,6 +87,9 @@
   border-radius: 10px;
   min-width: 20px;
   text-align: center;
+}
+.badgePulse {
+  animation: alertBadgePulse 1.15s ease-in-out infinite;
 }
 
 .footer {
@@ -97,6 +104,16 @@
   color: var(--light);
   font-size: 13px;
   margin-bottom: 2px;
+}
+
+@keyframes alertBlink {
+  0%, 100% { opacity: 1; filter: drop-shadow(0 0 0 rgba(255,69,0,0)); }
+  50% { opacity: 0.35; filter: drop-shadow(0 0 10px rgba(255,69,0,0.9)); }
+}
+
+@keyframes alertBadgePulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 rgba(255,69,0,0); }
+  50% { opacity: 0.5; box-shadow: 0 0 12px rgba(255,69,0,0.85); }
 }
 
 @media (max-width: 1024px) {

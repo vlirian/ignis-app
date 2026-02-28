@@ -4,7 +4,7 @@ import { UNIT_IDS, buildZones, unitAlertLevel } from '../data/units'
 import styles from './Sidebar.module.css'
 
 const NAV = [
-  { to: '/',             icon: '📊', label: 'Panel General' },
+  { to: '/panel',        icon: '📊', label: 'Panel General' },
   { to: '/alertas',      icon: '🚨', label: 'Alertas',       badge: 'alert' },
   { to: '/unidades',     icon: '🚒', label: 'Unidades' },
   { to: '/revision',     icon: '📅', label: 'Revisión' },
@@ -18,15 +18,27 @@ const NAV = [
 ]
 
 export default function Sidebar({ open, onClose }) {
-  const { configs, items, isAdmin } = useApp()
+  const { configs, items, isAdmin, revisionIncidents } = useApp()
   const navItems = NAV.filter(item => !item.adminOnly || isAdmin)
 
-  const totalAlerts = UNIT_IDS.reduce((acc, id) => {
+  const stockAlertUnits = UNIT_IDS.reduce((acc, id) => {
     const cfg = configs[id]
     const zones = buildZones(cfg.numCofres, cfg.hasTecho, cfg.hasTrasera)
     const level = unitAlertLevel(items[id], zones)
     return level === 'alert' ? acc + 1 : acc
   }, 0)
+
+  const reviewAlertCount = (() => {
+    const keys = new Set()
+    ;(revisionIncidents || []).forEach(inc => {
+      const key = `${inc.unitId}|${String(inc.zone || '').trim().toLowerCase()}|${String(inc.item || '').trim().toLowerCase()}`
+      keys.add(key)
+    })
+    return keys.size
+  })()
+
+  const totalAlerts = stockAlertUnits + reviewAlertCount
+  const hasActiveAlerts = totalAlerts > 0
 
   return (
     <>
@@ -40,7 +52,13 @@ export default function Sidebar({ open, onClose }) {
         <nav className={styles.nav}>
           <div className={styles.sectionLabel}>Principal</div>
           {navItems.slice(0, 2).map(item => (
-            <NavItem key={item.to} item={item} alerts={item.badge === 'alert' ? totalAlerts : 0} onClose={onClose} />
+            <NavItem
+              key={item.to}
+              item={item}
+              alerts={item.badge === 'alert' ? totalAlerts : 0}
+              pulse={item.badge === 'alert' ? hasActiveAlerts : false}
+              onClose={onClose}
+            />
           ))}
 
           <div className={styles.sectionLabel}>Operaciones</div>
@@ -68,7 +86,7 @@ export default function Sidebar({ open, onClose }) {
   )
 }
 
-function NavItem({ item, alerts = 0, onClose }) {
+function NavItem({ item, alerts = 0, pulse = false, onClose }) {
   return (
     <NavLink
       to={item.to}
@@ -76,9 +94,9 @@ function NavItem({ item, alerts = 0, onClose }) {
       className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
       onClick={onClose}
     >
-      <span className={styles.navIcon}>{item.icon}</span>
+      <span className={`${styles.navIcon} ${pulse ? styles.alertPulse : ''}`}>{item.icon}</span>
       <span className={styles.navLabel}>{item.label}</span>
-      {alerts > 0 && <span className={styles.badge}>{alerts}</span>}
+      {alerts > 0 && <span className={`${styles.badge} ${pulse ? styles.badgePulse : ''}`}>{alerts}</span>}
     </NavLink>
   )
 }

@@ -23,6 +23,7 @@ const BV_COLORS = {
   6: { bg: 'rgba(26,188,156,0.12)', border: '#16A085', text: '#1ABC9C' },
   7: { bg: 'rgba(241,196,15,0.12)', border: '#F39C12', text: '#F1C40F' },
 }
+const PHOTO_NOTES_MARKER = '[[FOTOS_REVISION]]'
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10)
@@ -37,6 +38,37 @@ function monthDays(year, month) {
   const daysInMonth = new Date(year, month + 1, 0).getDate()
   const startOffset = (firstDay + 6) % 7
   return { daysInMonth, startOffset }
+}
+
+function makeLocalAttachmentFromUrl(url, idx = 0) {
+  return {
+    id: `url-${idx}-${Math.random().toString(36).slice(2, 9)}`,
+    url,
+    name: `Foto ${idx + 1}`,
+  }
+}
+
+function parseNotesAndPhotoUrls(raw = '') {
+  const txt = String(raw || '')
+  const markerPos = txt.indexOf(PHOTO_NOTES_MARKER)
+  if (markerPos === -1) return { notes: txt, photoUrls: [] }
+
+  const notes = txt.slice(0, markerPos).trimEnd()
+  const after = txt.slice(markerPos + PHOTO_NOTES_MARKER.length)
+  const photoUrls = after
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .filter(s => /^https?:\/\//i.test(s) || /^data:image\//i.test(s))
+
+  return { notes, photoUrls }
+}
+
+function composeNotesWithPhotoUrls(notes = '', photoUrls = []) {
+  const cleanNotes = String(notes || '').trim()
+  const cleanUrls = (photoUrls || []).map(s => String(s || '').trim()).filter(Boolean)
+  if (cleanUrls.length === 0) return cleanNotes
+  return `${cleanNotes}${cleanNotes ? '\n\n' : ''}${PHOTO_NOTES_MARKER}\n${cleanUrls.join('\n')}`
 }
 
 // ── VISTA PRINCIPAL ───────────────────────────────────────
@@ -98,6 +130,9 @@ export default function Revision() {
       const itemChecks = {}
       const itemNotes = {}
       const incidents = []
+      const reportRowsForUnit = (reportIndex[`${date}-${bomberoId}`] || []).filter(r => r.unit_id === unitId)
+      const latestGeneralNotes = reportRowsForUnit[0]?.general_notes || ''
+      const { notes: parsedNotes, photoUrls } = parseNotesAndPhotoUrls(latestGeneralNotes)
 
       const existingIncidents = (reportIndex[`${date}-${bomberoId}`] || [])
         .filter(r => r.unit_id === unitId)
@@ -139,18 +174,41 @@ export default function Revision() {
           }
         })
       })
-      return { unitId, itemChecks, itemNotes, incidents, notes: '', done: false }
+      return {
+        unitId,
+        itemChecks,
+        itemNotes,
+        incidents,
+        notes: parsedNotes || '',
+        attachments: photoUrls.map((u, idx) => makeLocalAttachmentFromUrl(u, idx)),
+        done: false,
+      }
     })
 
-    setReviewState({ date, bomberoId, activeUnitIdx: 0, units })
+    setReviewState({ date, bomberoId, activeUnitIdx: null, units })
     setView('review')
   }
 
   // Guardar toda la revisión en Supabase
   async function saveReview() {
+    const pendingByUnit = (reviewState?.units || [])
+      .map(u => ({
+        unitId: u.unitId,
+        pending: Object.values(u.itemChecks || {}).filter(v => v !== 'ok' && v !== 'issue').length,
+      }))
+      .filter(x => x.pending > 0)
+
+    if (pendingByUnit.length > 0) {
+      const totalPending = pendingByUnit.reduce((acc, x) => acc + x.pending, 0)
+      const unitsLabel = pendingByUnit.map(x => `U${String(x.unitId).padStart(2, '0')}`).join(', ')
+      showToast(`Falta material por revisar (${totalPending}) en ${unitsLabel}`, 'warn')
+      return
+    }
+
     setSaving(true)
     const { date, bomberoId, units } = reviewState
     const email = session?.user?.email || 'desconocido'
+    const notificationUnits = []
 
     for (const unit of units) {
       const cfg   = configs[unit.unitId]
@@ -205,6 +263,34 @@ export default function Revision() {
           source: 'revision',
         }))
       ]
+      if (incidents.length > 0) {
+        notificationUnits.push({
+          unitId: unit.unitId,
+          incidents: incidents.map(i => ({ item: i.item, zone: i.zone, note: i.note || '' })),
+        })
+      }
+
+      const existingUrls = (unit.attachments || []).map(a => a?.url).filter(Boolean)
+      const pendingFiles = (unit.attachments || []).filter(a => a?.file)
+      const uploadedUrls = []
+      for (const att of pendingFiles) {
+        const safeName = String(att.name || 'foto.jpg').replace(/[^a-zA-Z0-9._-]/g, '_')
+        const ext = safeName.includes('.') ? safeName.split('.').pop() : 'jpg'
+        const path = `${date}/bv${bomberoId}/u${unit.unitId}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`
+        const { error: uploadErr } = await supabase
+          .storage
+          .from('revision-observaciones')
+          .upload(path, att.file, { upsert: false })
+        if (uploadErr) {
+          setSaving(false)
+          showToast(`No se pudo subir foto: ${uploadErr.message || 'error'}`, 'error')
+          return
+        }
+        const { data: pub } = supabase.storage.from('revision-observaciones').getPublicUrl(path)
+        if (pub?.publicUrl) uploadedUrls.push(pub.publicUrl)
+      }
+
+      const generalNotes = composeNotesWithPhotoUrls(unit.notes, [...existingUrls, ...uploadedUrls])
 
       await supabase.from('revision_reports').upsert({
         report_date:   date,
@@ -212,9 +298,26 @@ export default function Revision() {
         unit_id:       unit.unitId,
         is_ok:         isOk,
         incidents,
-        general_notes: unit.notes,
+        general_notes: generalNotes,
         reviewed_by:   email,
       }, { onConflict: 'report_date,bombero_id,unit_id' })
+    }
+
+    // Notificación por correo a admins (solo si hay incidencias).
+    if (notificationUnits.length > 0) {
+      const { error: notifyErr } = await supabase.functions.invoke('send-review-incidents-email', {
+        body: {
+          reportDate: date,
+          bomberoId,
+          reviewedBy: email,
+          units: notificationUnits,
+        },
+      })
+      if (notifyErr) {
+        // No bloquear guardado por fallo de notificación.
+        console.warn('No se pudo enviar email de incidencias:', notifyErr.message || notifyErr)
+        showToast('Revisión guardada. El aviso por email no se pudo enviar.', 'warn')
+      }
     }
 
     setSaving(false)
@@ -231,15 +334,6 @@ export default function Revision() {
   if (view === 'review' && reviewState) {
     const { date, bomberoId, activeUnitIdx, units } = reviewState
     const c = BV_COLORS[bomberoId]
-    const activeUnit = units[activeUnitIdx]
-    const cfg   = configs[activeUnit.unitId]
-    const zones = cfg ? buildZones(cfg.numCofres, cfg.hasTecho, cfg.hasTrasera) : []
-    const unitItems = items[activeUnit.unitId] || {}
-
-    const totalItems   = Object.keys(activeUnit.itemChecks).length
-    const checkedCount = Object.values(activeUnit.itemChecks).filter(v => v === 'ok' || v === 'issue').length
-    const issueCount   = Object.values(activeUnit.itemChecks).filter(v => v === 'issue').length
-    const allDone      = checkedCount === totalItems
     const dateLabel    = new Date(date + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })
     const allUnitsDone = units.every(u => Object.values(u.itemChecks).every(v => v === 'ok' || v === 'issue') || u.done)
     const incidentKey = (unitId, zone, item) => `${unitId}|${String(zone || '').trim().toLowerCase()}|${String(item || '').trim().toLowerCase()}`
@@ -390,9 +484,125 @@ export default function Revision() {
       })
     }
 
+    function addAttachmentFiles(filesLike) {
+      const files = Array.from(filesLike || []).filter(f => f?.type?.startsWith('image/'))
+      if (files.length === 0) return
+      setReviewState(prev => {
+        const units = prev.units.map((u, i) => {
+          if (i !== prev.activeUnitIdx) return u
+          const current = Array.isArray(u.attachments) ? u.attachments : []
+          const appended = files.map((f, idx) => ({
+            id: `new-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 8)}`,
+            file: f,
+            name: f.name || `foto-${idx + 1}.jpg`,
+            url: URL.createObjectURL(f),
+            local: true,
+          }))
+          return { ...u, attachments: [...current, ...appended] }
+        })
+        return { ...prev, units }
+      })
+    }
+
+    function removeAttachment(id) {
+      setReviewState(prev => {
+        const units = prev.units.map((u, i) => {
+          if (i !== prev.activeUnitIdx) return u
+          const current = Array.isArray(u.attachments) ? u.attachments : []
+          const target = current.find(a => a.id === id)
+          if (target?.local && target?.url?.startsWith('blob:')) URL.revokeObjectURL(target.url)
+          return { ...u, attachments: current.filter(a => a.id !== id) }
+        })
+        return { ...prev, units }
+      })
+    }
+
     function goToUnit(idx) {
       setReviewState(prev => ({ ...prev, activeUnitIdx: idx }))
     }
+
+    if (!Number.isInteger(activeUnitIdx)) {
+      return (
+        <div className="animate-in page-container">
+          <div className="card" style={{ padding: 18, borderTop: `3px solid ${c.border}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <button className="btn btn-ghost btn-sm" onClick={() => { setView('calendar'); setReviewState(null) }}>‹ Volver</button>
+                <div style={{ fontFamily: 'Barlow Condensed', fontSize: 18, fontWeight: 800, color: c.text, background: c.bg, border: `1px solid ${c.border}`, borderRadius: 8, padding: '4px 12px', letterSpacing: 1 }}>BV{bomberoId}</div>
+                <div>
+                  <div style={{ fontFamily: 'Barlow Condensed', fontSize: 24, fontWeight: 800, letterSpacing: 0.8 }}>
+                    Selecciona unidad para revisar
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--mid)' }}>Revisión del {dateLabel} · {units.length} unidad(es)</div>
+                </div>
+              </div>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={saveReview}
+                disabled={saving}
+                style={{ background: 'var(--green)', borderColor: 'var(--green)' }}
+              >
+                {saving ? 'Guardando...' : '✔ Guardar revisión completa'}
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12, marginTop: 14 }}>
+            {units.map((u, i) => {
+              const total = Object.keys(u.itemChecks).length
+              const checked = Object.values(u.itemChecks).filter(v => v === 'ok' || v === 'issue').length
+              const issues = Object.values(u.itemChecks).filter(v => v === 'issue').length
+              const pct = total ? Math.round((checked / total) * 100) : 0
+              const done = checked === total
+              return (
+                <button
+                  key={u.unitId}
+                  className="card review-unit-card"
+                  onClick={() => goToUnit(i)}
+                  style={{
+                    cursor: 'pointer',
+                    padding: '16px 14px',
+                    border: `1px solid ${done ? 'rgba(39,174,96,0.4)' : 'var(--border2)'}`,
+                    background: done ? 'rgba(39,174,96,0.08)' : 'var(--ash)',
+                    textAlign: 'left',
+                    position: 'relative',
+                  }}
+                >
+                  <span className={`review-unit-card-halo ${done ? 'done' : 'pending'}`} />
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 24 }}>🚒</span>
+                      <div style={{ fontFamily: 'Barlow Condensed', fontSize: 28, fontWeight: 900, letterSpacing: 1, color: 'var(--white)', textShadow: '0 1px 0 rgba(0,0,0,0.35)' }}>
+                        U{String(u.unitId).padStart(2, '0')}
+                      </div>
+                    </div>
+                    <span className={`chip ${done ? 'chip-ok' : issues > 0 ? 'chip-alert' : 'chip-warn'}`}>
+                      {done ? 'Completa' : issues > 0 ? 'Con incidencias' : 'Pendiente'}
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 10, height: 7, background: 'rgba(255,255,255,0.08)', borderRadius: 6, overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: done ? 'var(--green)' : issues > 0 ? 'var(--red)' : 'var(--yellow)' }} />
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 12, color: done ? 'rgba(46,204,113,0.92)' : 'rgba(236,237,240,0.92)' }}>
+                    {checked}/{total} artículos · {issues} incidencias
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )
+    }
+
+    const activeUnit = units[activeUnitIdx]
+    const cfg   = configs[activeUnit.unitId]
+    const zones = cfg ? buildZones(cfg.numCofres, cfg.hasTecho, cfg.hasTrasera) : []
+    const unitItems = items[activeUnit.unitId] || {}
+
+    const totalItems   = Object.keys(activeUnit.itemChecks).length
+    const checkedCount = Object.values(activeUnit.itemChecks).filter(v => v === 'ok' || v === 'issue').length
+    const issueCount   = Object.values(activeUnit.itemChecks).filter(v => v === 'issue').length
+    const allDone      = checkedCount === totalItems
 
     return (
       <>
@@ -430,20 +640,31 @@ export default function Revision() {
             {units.map((u, i) => {
               const done = Object.values(u.itemChecks).every(v => v === 'ok' || v === 'issue')
               const partial = Object.values(u.itemChecks).some(v => v !== null)
+              const checked = Object.values(u.itemChecks).filter(v => v === 'ok' || v === 'issue').length
+              const total = Object.keys(u.itemChecks).length
+              const pct = total ? Math.round((checked / total) * 100) : 0
               return (
                 <button
                   key={u.unitId}
                   onClick={() => goToUnit(i)}
                   style={{
-                    padding: '6px 14px', borderRadius: 8, cursor: 'pointer',
-                    fontFamily: 'Barlow Condensed', fontSize: 14, fontWeight: 700,
+                    padding: '7px 10px', borderRadius: 10, cursor: 'pointer',
+                    minWidth: 106,
+                    fontFamily: 'Barlow Condensed', fontSize: 13, fontWeight: 700,
                     border: `2px solid ${i === activeUnitIdx ? c.border : done ? 'var(--green)' : partial ? 'var(--yellow)' : 'var(--border2)'}`,
                     background: i === activeUnitIdx ? c.bg : done ? 'rgba(39,174,96,0.1)' : 'transparent',
                     color: i === activeUnitIdx ? c.text : done ? 'var(--green-l)' : partial ? 'var(--yellow-l)' : 'var(--mid)',
                     transition: 'all 0.15s',
                   }}
                 >
-                  {done ? '✔' : partial ? '◑' : '○'} U{String(u.unitId).padStart(2,'0')}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
+                    <span style={{ fontSize: 16, lineHeight: 1 }}>🚒</span>
+                    <span>{done ? '✔' : partial ? '◑' : '○'} U{String(u.unitId).padStart(2,'0')}</span>
+                  </div>
+                  <div style={{ marginTop: 4, height: 4, background: 'rgba(255,255,255,0.12)', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${pct}%`, background: done ? 'var(--green)' : partial ? 'var(--yellow)' : 'var(--border2)' }} />
+                  </div>
+                  <div style={{ marginTop: 3, fontSize: 10, opacity: 0.8 }}>{checked}/{total}</div>
                 </button>
               )
             })}
@@ -697,6 +918,45 @@ export default function Revision() {
                 value={activeUnit.notes}
                 onChange={e => setNotes(e.target.value)}
               />
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
+                  📷 Cámara
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    style={{ display: 'none' }}
+                    onChange={e => { addAttachmentFiles(e.target.files); e.target.value = '' }}
+                  />
+                </label>
+                <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
+                  🖼 Dispositivo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    style={{ display: 'none' }}
+                    onChange={e => { addAttachmentFiles(e.target.files); e.target.value = '' }}
+                  />
+                </label>
+              </div>
+              {(activeUnit.attachments || []).length > 0 && (
+                <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(74px,1fr))', gap: 8 }}>
+                  {(activeUnit.attachments || []).map(att => (
+                    <div key={att.id} style={{ position: 'relative', border: '1px solid var(--border2)', borderRadius: 8, overflow: 'hidden', background: 'var(--panel)' }}>
+                      <img src={att.url} alt={att.name || 'Adjunto'} style={{ width: '100%', height: 64, objectFit: 'cover', display: 'block' }} />
+                      <button
+                        onClick={() => removeAttachment(att.id)}
+                        className="btn-icon"
+                        style={{ position: 'absolute', top: 4, right: 4, width: 20, height: 20, fontSize: 12, background: 'rgba(0,0,0,0.6)' }}
+                        title="Quitar foto"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Resumen todas las unidades */}
@@ -704,36 +964,36 @@ export default function Revision() {
               <div style={{ fontSize: 10, color: 'var(--mid)', letterSpacing: 1.5, textTransform: 'uppercase', fontWeight: 700, marginBottom: 10 }}>
                 Progreso global
               </div>
-              {units.map((u, i) => {
-                const total   = Object.keys(u.itemChecks).length
-                const checked = Object.values(u.itemChecks).filter(Boolean).length
-                const done    = checked === total
-                const pct     = total ? Math.round((checked / total) * 100) : 0
-                return (
-                  <div
-                    key={u.unitId}
-                    onClick={() => goToUnit(i)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      padding: '6px 8px', borderRadius: 6, cursor: 'pointer', marginBottom: 4,
-                      background: i === activeUnitIdx ? c.bg : 'transparent',
-                      border: `1px solid ${i === activeUnitIdx ? c.border : 'transparent'}`,
-                      transition: 'all 0.15s',
-                    }}
-                  >
-                    <div style={{ fontSize: 16 }}>{done ? '✅' : u.incidents.length > 0 ? '⚠️' : '🔄'}</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: i === activeUnitIdx ? c.text : 'var(--light)' }}>
-                        Unidad {u.unitId}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(86px,1fr))', gap: 8 }}>
+                {units.map((u, i) => {
+                  const total   = Object.keys(u.itemChecks).length
+                  const checked = Object.values(u.itemChecks).filter(Boolean).length
+                  const done    = checked === total
+                  const pct     = total ? Math.round((checked / total) * 100) : 0
+                  return (
+                    <button
+                      key={u.unitId}
+                      onClick={() => goToUnit(i)}
+                      style={{
+                        borderRadius: 8,
+                        cursor: 'pointer',
+                        padding: '8px 6px',
+                        border: `1px solid ${i === activeUnitIdx ? c.border : done ? 'rgba(39,174,96,0.45)' : 'var(--border2)'}`,
+                        background: i === activeUnitIdx ? c.bg : done ? 'rgba(39,174,96,0.08)' : 'var(--panel)',
+                        color: i === activeUnitIdx ? c.text : done ? 'var(--green-l)' : 'var(--light)',
+                        transition: 'all 0.15s',
+                        textAlign: 'center',
+                      }}
+                    >
+                      <div style={{ fontSize: 16, lineHeight: 1 }}>🚒</div>
+                      <div style={{ fontFamily: 'Barlow Condensed', fontSize: 13, fontWeight: 700, marginTop: 4 }}>
+                        U{String(u.unitId).padStart(2, '0')}
                       </div>
-                      <div style={{ height: 4, background: 'var(--border)', borderRadius: 2, marginTop: 3, overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: pct + '%', background: done ? 'var(--green)' : 'var(--fire)', borderRadius: 2, transition: 'width 0.3s' }} />
-                      </div>
-                    </div>
-                    <span style={{ fontSize: 11, color: 'var(--mid)', fontFamily: 'Roboto Mono' }}>{pct}%</span>
-                  </div>
-                )
-              })}
+                      <div style={{ fontSize: 10, color: 'var(--mid)', marginTop: 2 }}>{pct}%</div>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
 
           </div>
@@ -935,9 +1195,10 @@ function TodayPanel({ date, reportIndex, onStart, onHistory }) {
           const bv   = parseInt(bvId)
           const key  = `${date}-${bv}`
           const reps = reportIndex[key] || []
-          const done = reps.length >= units.length
-          const hasIncident = reps.some(r => !r.is_ok)
-          const partial = reps.length > 0 && !done
+          const effectiveReps = reps.filter(r => r.reviewed_by !== 'unidades')
+          const done = effectiveReps.length >= units.length
+          const hasIncident = effectiveReps.some(r => !r.is_ok)
+          const partial = effectiveReps.length > 0 && !done
           const c = BV_COLORS[bv]
           return (
             <button key={bv}
@@ -954,7 +1215,7 @@ function TodayPanel({ date, reportIndex, onStart, onHistory }) {
             >
               <span>{done ? (hasIncident ? '⚠' : '✔') : partial ? '◑' : '○'}</span>
               <span style={{ flex: 1 }}>BV{bv}</span>
-              {partial && <span style={{ opacity: 0.65 }}>({reps.length}/{units.length})</span>}
+              {partial && <span style={{ opacity: 0.65 }}>({effectiveReps.length}/{units.length})</span>}
             </button>
           )
         })}
@@ -1047,9 +1308,10 @@ function DayCell({ day, date, isToday, isFuture, isPast, isWeekend, reportIndex,
           const bv   = parseInt(bvId)
           const key  = `${date}-${bv}`
           const reps = reportIndex[key] || []
-          const done = reps.length >= units.length
-          const hasIncident = reps.some(r => !r.is_ok)
-          const partial = reps.length > 0 && !done
+          const effectiveReps = reps.filter(r => r.reviewed_by !== 'unidades')
+          const done = effectiveReps.length >= units.length
+          const hasIncident = effectiveReps.some(r => !r.is_ok)
+          const partial = effectiveReps.length > 0 && !done
           const c = BV_COLORS[bv]
           return (
             <button key={bv}
@@ -1084,7 +1346,7 @@ function DayCell({ day, date, isToday, isFuture, isPast, isWeekend, reportIndex,
             >
               <span>{locked ? '🚫' : done ? (hasIncident ? '⚠' : '✔') : partial ? '◑' : '○'}</span>
               <span>BV{bv}</span>
-              {partial && <span style={{ opacity: 0.6 }}>({reps.length}/{units.length})</span>}
+              {partial && <span style={{ opacity: 0.6 }}>({effectiveReps.length}/{units.length})</span>}
             </button>
           )
         })}
@@ -1096,11 +1358,13 @@ function DayCell({ day, date, isToday, isFuture, isPast, isWeekend, reportIndex,
 // ── Modal historial ───────────────────────────────────────
 function HistoryModal({ date, bomberoId, reports, onClose, onRefresh, onNotify }) {
   const c = BV_COLORS[bomberoId]
-  const totalIncidents = reports.reduce((acc, r) => acc + (r.incidents?.length || 0), 0)
-  const allOk = reports.length > 0 && reports.every(r => r.is_ok)
+  const visibleReports = (reports || []).filter(r => r.reviewed_by !== 'unidades')
+  const totalIncidents = visibleReports.reduce((acc, r) => acc + (r.incidents?.length || 0), 0)
+  const allOk = visibleReports.length > 0 && visibleReports.every(r => r.is_ok)
   const dateLabel = new Date(date + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
   const [editState, setEditState] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [photoViewer, setPhotoViewer] = useState(null) // { urls: string[], index: number, title?: string }
 
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') onClose() }
@@ -1109,12 +1373,14 @@ function HistoryModal({ date, bomberoId, reports, onClose, onRefresh, onNotify }
   }, [onClose])
 
   function buildEditState(report) {
+    const parsed = parseNotesAndPhotoUrls(report.general_notes || '')
     return {
       id: report.id,
       unit_id: report.unit_id,
       reviewed_by: report.reviewed_by || '',
       is_ok: !!report.is_ok,
-      general_notes: report.general_notes || '',
+      general_notes: parsed.notes || '',
+      photoUrls: parsed.photoUrls || [],
       incidents: Array.isArray(report.incidents) ? report.incidents.map(i => ({
         zone: i?.zone || '',
         item: i?.item || '',
@@ -1133,7 +1399,7 @@ function HistoryModal({ date, bomberoId, reports, onClose, onRefresh, onNotify }
         incidents: editState.incidents
           .filter(i => i.item.trim())
           .map(i => ({ zone: i.zone || '', item: i.item.trim(), note: i.note || '' })),
-        general_notes: editState.general_notes || '',
+        general_notes: composeNotesWithPhotoUrls(editState.general_notes || '', editState.photoUrls || []),
       })
       .eq('id', editState.id)
     setSaving(false)
@@ -1147,37 +1413,76 @@ function HistoryModal({ date, bomberoId, reports, onClose, onRefresh, onNotify }
   }
 
   async function deleteReport(reportId) {
-    const ok = window.confirm('¿Seguro que quieres borrar este informe de unidad?')
+    const ok = window.confirm('¿Resetear esta unidad para volver a revisarla como pendiente?')
     if (!ok) return
-    const { error } = await supabase.from('revision_reports').delete().eq('id', reportId)
+    const { error } = await supabase
+      .from('revision_reports')
+      .update({
+        is_ok: false,
+        incidents: [],
+        general_notes: '',
+        reviewed_by: 'unidades',
+      })
+      .eq('id', reportId)
     if (error) {
-      onNotify('No se pudo borrar el informe', 'error')
+      onNotify('No se pudo resetear el informe', 'error')
       return
     }
-    onNotify('Informe borrado', 'warn')
+    onNotify('Unidad reseteada: vuelve a Revisión y podrás revisarla de nuevo', 'warn')
     await onRefresh()
+  }
+
+  async function resetAllReports() {
+    const ok = window.confirm('¿Resetear TODAS las unidades de este informe para volver a revisarlas?')
+    if (!ok) return
+    const ids = visibleReports.map(r => r.id)
+    if (ids.length === 0) return
+    const { error } = await supabase
+      .from('revision_reports')
+      .update({
+        is_ok: false,
+        incidents: [],
+        general_notes: '',
+        reviewed_by: 'unidades',
+      })
+      .in('id', ids)
+    if (error) {
+      onNotify('No se pudieron resetear las unidades', 'error')
+      return
+    }
+    onNotify('Informe reseteado: vuelve a Revisión para repetirla', 'warn')
+    await onRefresh()
+  }
+
+  function openPhotoViewer(urls = [], title = 'Foto') {
+    const clean = (urls || []).filter(Boolean)
+    if (!clean.length) return
+    setPhotoViewer({ urls: clean, index: 0, title })
   }
 
   return (
     <>
-      <div onClick={e => { if (e.target === e.currentTarget) onClose() }} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-        <div style={{ background: 'var(--ash)', border: '1px solid var(--border2)', borderRadius: 14, width: '100%', maxWidth: 780, maxHeight: '85vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
+      <div onClick={e => { if (e.target === e.currentTarget) onClose() }} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 200, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 20, paddingTop: 72 }}>
+        <div style={{ background: 'var(--ash)', border: '1px solid var(--border2)', borderRadius: 14, width: '100%', maxWidth: 780, maxHeight: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--ash)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ fontFamily: 'Barlow Condensed', fontSize: 16, color: c.text, background: c.bg, border: `1px solid ${c.border}`, borderRadius: 6, padding: '2px 10px', fontWeight: 800 }}>BV{bomberoId}</span>
               <div>
                 <div style={{ fontFamily: 'Barlow Condensed', fontSize: 18, fontWeight: 700 }}>Informe de revisión</div>
-                <div style={{ fontSize: 11, color: 'var(--mid)', textTransform: 'capitalize' }}>{dateLabel}</div>
+                  <div style={{ fontSize: 11, color: 'var(--mid)', textTransform: 'capitalize' }}>{dateLabel}</div>
+                </div>
               </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button className="btn btn-danger btn-sm" onClick={resetAllReports}>Resetear todo</button>
+              <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--mid)', cursor: 'pointer', fontSize: 20 }}>✕</button>
             </div>
-            <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--mid)', cursor: 'pointer', fontSize: 20 }}>✕</button>
           </div>
 
           <div style={{ overflowY: 'auto', padding: '16px 20px' }}>
             <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
               {[
                 { val: allOk ? '✔ OK' : '⚠', label: 'Estado', color: allOk ? 'var(--green-l)' : 'var(--red-l)', bg: allOk ? 'rgba(39,174,96,0.1)' : 'rgba(192,57,43,0.1)', border: allOk ? 'var(--green)' : 'var(--red)' },
-                { val: reports.length, label: 'Unidades', color: 'var(--light)', bg: 'var(--panel)', border: 'var(--border)' },
+                { val: visibleReports.length, label: 'Unidades', color: 'var(--light)', bg: 'var(--panel)', border: 'var(--border)' },
                 { val: totalIncidents, label: 'Incidencias', color: totalIncidents > 0 ? 'var(--red-l)' : 'var(--green-l)', bg: totalIncidents > 0 ? 'rgba(192,57,43,0.08)' : 'var(--panel)', border: totalIncidents > 0 ? 'rgba(192,57,43,0.3)' : 'var(--border)' },
               ].map(s => (
                 <div key={s.label} style={{ flex: 1, padding: '10px', borderRadius: 8, background: s.bg, border: `1px solid ${s.border}`, textAlign: 'center' }}>
@@ -1187,39 +1492,69 @@ function HistoryModal({ date, bomberoId, reports, onClose, onRefresh, onNotify }
               ))}
             </div>
 
-            {reports.map(r => (
-              <div key={r.id} style={{ marginBottom: 10, borderRadius: 8, overflow: 'hidden', border: `1px solid ${r.is_ok ? 'var(--border)' : 'rgba(192,57,43,0.3)'}` }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: r.is_ok ? 'var(--panel)' : 'rgba(192,57,43,0.07)' }}>
-                  <div style={{ fontFamily: 'Barlow Condensed', fontSize: 15, fontWeight: 800 }}>🚒 Unidad {r.unit_id}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 11, color: 'var(--mid)' }}>por {r.reviewed_by}</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: r.is_ok ? 'rgba(39,174,96,0.15)' : 'rgba(192,57,43,0.2)', color: r.is_ok ? 'var(--green-l)' : 'var(--red-l)', border: `1px solid ${r.is_ok ? 'rgba(39,174,96,0.3)' : 'rgba(192,57,43,0.3)'}` }}>
-                      {r.is_ok ? '✔ CORRECTO' : '⚠ INCIDENCIAS'}
-                    </span>
-                    <button className="btn btn-ghost btn-sm" onClick={() => setEditState(buildEditState(r))}>Editar</button>
-                    <button className="btn btn-danger btn-sm" onClick={() => deleteReport(r.id)}>Borrar</button>
-                  </div>
-                </div>
-                {r.incidents?.length > 0 && (
-                  <div style={{ padding: '8px 14px' }}>
-                    {r.incidents.map((inc, i) => (
-                      <div key={i} style={{ fontSize: 12, color: 'var(--red-l)', padding: '3px 0', borderBottom: '1px solid rgba(192,57,43,0.1)', display: 'flex', gap: 8 }}>
-                        <span>⚠</span><span><strong>{inc.item}</strong> — {inc.zone}{inc.note ? ` — ${inc.note}` : ''}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {r.general_notes && (
-                  <div style={{ padding: '6px 14px', fontSize: 11, color: 'var(--mid)', fontStyle: 'italic', borderTop: '1px solid var(--border)' }}>📝 {r.general_notes}</div>
-                )}
+            {visibleReports.length === 0 ? (
+              <div className="card" style={{ padding: 20, color: 'var(--mid)' }}>
+                No hay informes guardados para este día/BV.
               </div>
-            ))}
+            ) : (
+              visibleReports.map(r => (
+                <div key={r.id} style={{ marginBottom: 10, borderRadius: 8, overflow: 'hidden', border: `1px solid ${r.is_ok ? 'var(--border)' : 'rgba(192,57,43,0.3)'}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: r.is_ok ? 'var(--panel)' : 'rgba(192,57,43,0.07)' }}>
+                    <div style={{ fontFamily: 'Barlow Condensed', fontSize: 15, fontWeight: 800 }}>🚒 Unidad {r.unit_id}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 11, color: 'var(--mid)' }}>por {r.reviewed_by}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: r.is_ok ? 'rgba(39,174,96,0.15)' : 'rgba(192,57,43,0.2)', color: r.is_ok ? 'var(--green-l)' : 'var(--red-l)', border: `1px solid ${r.is_ok ? 'rgba(39,174,96,0.3)' : 'rgba(192,57,43,0.3)'}` }}>
+                        {r.is_ok ? '✔ CORRECTO' : '⚠ INCIDENCIAS'}
+                      </span>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setEditState(buildEditState(r))}>Editar</button>
+                      <button className="btn btn-danger btn-sm" onClick={() => deleteReport(r.id)}>Resetear</button>
+                    </div>
+                  </div>
+                  {r.incidents?.length > 0 && (
+                    <div style={{ padding: '8px 14px' }}>
+                      {r.incidents.map((inc, i) => (
+                        <div key={i} style={{ fontSize: 12, color: 'var(--red-l)', padding: '3px 0', borderBottom: '1px solid rgba(192,57,43,0.1)', display: 'flex', gap: 8 }}>
+                          <span>⚠</span><span><strong>{inc.item}</strong> — {inc.zone}{inc.note ? ` — ${inc.note}` : ''}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {(() => {
+                    const parsed = parseNotesAndPhotoUrls(r.general_notes || '')
+                    const note = parsed.notes
+                    const photos = parsed.photoUrls || []
+                    if (!note && photos.length === 0) return null
+                    return (
+                      <div style={{ padding: '8px 14px', borderTop: '1px solid var(--border)' }}>
+                        {note && (
+                          <div style={{ fontSize: 11, color: 'var(--mid)', fontStyle: 'italic' }}>📝 {note}</div>
+                        )}
+                        {photos.length > 0 && (
+                          <div style={{ marginTop: note ? 8 : 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(80px,1fr))', gap: 8 }}>
+                            {photos.map((url, idx) => (
+                              <button
+                                key={`${r.id}-ph-${idx}`}
+                                onClick={() => openPhotoViewer(photos, `BV${bomberoId} · U${String(r.unit_id).padStart(2, '0')}`)}
+                                title="Ver foto"
+                                style={{ all: 'unset', cursor: 'zoom-in', display: 'block', border: '1px solid var(--border2)', borderRadius: 6, overflow: 'hidden' }}
+                              >
+                                <img src={url} alt={`Foto ${idx + 1}`} style={{ width: '100%', height: 66, objectFit: 'cover', display: 'block' }} />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
 
       {editState && (
-        <div onClick={e => { if (e.target === e.currentTarget) setEditState(null) }} className="modal-overlay" style={{ zIndex: 210 }}>
+        <div onClick={e => { if (e.target === e.currentTarget) setEditState(null) }} className="modal-overlay" style={{ zIndex: 210, alignItems: 'center', paddingTop: 20 }}>
           <div className="modal" style={{ maxWidth: 760 }}>
             <div className="modal-header">
               <div className="modal-title">Editar informe · U{String(editState.unit_id).padStart(2, '0')}</div>
@@ -1275,10 +1610,75 @@ function HistoryModal({ date, bomberoId, reports, onClose, onRefresh, onNotify }
                 <label className="form-label">Observaciones</label>
                 <textarea className="form-input" style={{ minHeight: 90, resize: 'vertical', fontFamily: 'Barlow' }} value={editState.general_notes} onChange={e => setEditState(p => ({ ...p, general_notes: e.target.value }))} />
               </div>
+              {(editState.photoUrls || []).length > 0 && (
+                <div className="form-group" style={{ marginTop: 10, marginBottom: 0 }}>
+                  <label className="form-label">Fotos adjuntas</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(84px,1fr))', gap: 8 }}>
+                    {(editState.photoUrls || []).map((url, idx) => (
+                      <div key={`edit-ph-${idx}`} style={{ position: 'relative', border: '1px solid var(--border2)', borderRadius: 6, overflow: 'hidden' }}>
+                        <button
+                          title="Ver foto"
+                          onClick={() => openPhotoViewer(editState.photoUrls || [], `BV${bomberoId} · U${String(editState.unit_id).padStart(2, '0')}`)}
+                          style={{ all: 'unset', cursor: 'zoom-in', display: 'block', width: '100%' }}
+                        >
+                          <img src={url} alt={`Foto ${idx + 1}`} style={{ width: '100%', height: 66, objectFit: 'cover', display: 'block' }} />
+                        </button>
+                        <button
+                          className="btn-icon"
+                          style={{ position: 'absolute', top: 4, right: 4, width: 20, height: 20, fontSize: 11, background: 'rgba(0,0,0,0.65)' }}
+                          onClick={() => setEditState(p => ({ ...p, photoUrls: (p.photoUrls || []).filter((_, i) => i !== idx) }))}
+                          title="Quitar foto"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div className="modal-footer">
               <button className="btn btn-ghost btn-sm" onClick={() => setEditState(null)}>Cancelar</button>
               <button className="btn btn-primary btn-sm" onClick={saveEdit} disabled={saving}>{saving ? 'Guardando...' : 'Guardar cambios'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {photoViewer && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setPhotoViewer(null) }}
+          style={{ position: 'fixed', inset: 0, zIndex: 260, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 20, paddingTop: 20 }}
+        >
+          <div style={{ width: '100%', maxWidth: 1100 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <div style={{ color: 'var(--light)', fontFamily: 'Barlow Condensed', fontSize: 20 }}>{photoViewer.title || 'Foto de incidencia'}</div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setPhotoViewer(null)}>Cerrar</button>
+            </div>
+            <div style={{ position: 'relative', border: '1px solid var(--border2)', borderRadius: 12, overflow: 'hidden', background: '#111' }}>
+              <img
+                src={photoViewer.urls[photoViewer.index]}
+                alt={`Foto ${photoViewer.index + 1}`}
+                style={{ width: '100%', maxHeight: '76vh', objectFit: 'contain', display: 'block', margin: '0 auto' }}
+              />
+              {photoViewer.urls.length > 1 && (
+                <>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', background: 'rgba(0,0,0,0.6)' }}
+                    onClick={() => setPhotoViewer(v => ({ ...v, index: (v.index - 1 + v.urls.length) % v.urls.length }))}
+                  >
+                    ‹
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'rgba(0,0,0,0.6)' }}
+                    onClick={() => setPhotoViewer(v => ({ ...v, index: (v.index + 1) % v.urls.length }))}
+                  >
+                    ›
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
