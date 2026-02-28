@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Routes, Route, useLocation } from 'react-router-dom'
+import { Routes, Route, useLocation, NavLink } from 'react-router-dom'
 import { AppProvider, useApp } from './lib/AppContext'
 import Sidebar from './components/Sidebar'
 import Toast from './components/Toast'
@@ -108,7 +108,29 @@ function AppInner() {
 
       <IncidentBanner />
       <Toast />
+      <MobileQuickNav />
     </div>
+  )
+}
+
+function MobileQuickNav() {
+  return (
+    <nav className="mobile-quick-nav">
+      <NavLink
+        to="/unidades"
+        className={({ isActive }) => `mobile-quick-item ${isActive ? 'active' : ''}`}
+      >
+        <span className="mobile-quick-icon">🚒</span>
+        <span className="mobile-quick-label">Unidades</span>
+      </NavLink>
+      <NavLink
+        to="/revision"
+        className={({ isActive }) => `mobile-quick-item ${isActive ? 'active' : ''}`}
+      >
+        <span className="mobile-quick-icon">📅</span>
+        <span className="mobile-quick-label">Revisión</span>
+      </NavLink>
+    </nav>
   )
 }
 

@@ -353,6 +353,10 @@ a { text-decoration: none; color: inherit; }
   color: var(--light);
 }
 
+.mobile-quick-nav {
+  display: none;
+}
+
 /* ── ANIMATIONS ── */
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(10px); }
@@ -413,6 +417,7 @@ a { text-decoration: none; color: inherit; }
 @media (max-width: 768px) {
   .form-row { grid-template-columns: 1fr; }
   .page-container { padding: 16px; }
+  .page-container { padding-bottom: 88px; }
   .topbar {
     flex-wrap: wrap;
     align-items: flex-start;
@@ -438,6 +443,52 @@ a { text-decoration: none; color: inherit; }
   }
   .table {
     min-width: 640px;
+  }
+
+  .mobile-quick-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    z-index: 120;
+    background: rgba(28, 29, 31, 0.94);
+    border: 1px solid var(--border2);
+    border-radius: 12px;
+    padding: 8px;
+    backdrop-filter: blur(8px);
+  }
+
+  .mobile-quick-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 10px 8px;
+    color: var(--light);
+    background: var(--panel);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .mobile-quick-item.active {
+    color: var(--fire);
+    border-color: var(--fire);
+    background: rgba(255, 69, 0, 0.12);
+  }
+
+  .mobile-quick-icon {
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  .mobile-quick-label {
+    font-size: 12px;
+    letter-spacing: 0.4px;
   }
 }
 
