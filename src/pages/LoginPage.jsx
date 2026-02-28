@@ -44,7 +44,7 @@ export default function LoginPage() {
       })
     setRequesting(false)
     if (reqErr) {
-      setRequestMsg('No se pudo enviar la solicitud. Revisa la tabla/policies en Supabase.')
+      setRequestMsg(`No se pudo enviar la solicitud: ${reqErr.message || 'error desconocido'}`)
       return
     }
     setRequestMsg('Solicitud enviada. Un administrador la revisará en el panel de Administración.')

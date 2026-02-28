@@ -3,7 +3,7 @@ import { UNIT_IDS, buildZones, unitAlertLevel, unitSummary, zoneStatus } from '.
 import { useNavigate } from 'react-router-dom'
 
 export default function Dashboard() {
-  const { configs, items } = useApp()
+  const { configs, items, revisionIncidents } = useApp()
   const navigate = useNavigate()
 
   // Calcula estadísticas globales
@@ -21,6 +21,10 @@ export default function Dashboard() {
       unitsWithAlerts.push({ id, ...s, level: unitAlertLevel(items[id], zones) })
     }
   })
+
+  const unitsWithRevisionIncidents = new Set(
+    (revisionIncidents || []).map(inc => Number(inc.unitId)).filter(Number.isFinite)
+  )
 
   const kpis = [
     { label: 'Total artículos',   value: globalTotal,   color: 'var(--blue-l)',   top: 'info',  icon: '📦' },
@@ -65,6 +69,9 @@ export default function Dashboard() {
                   fontFamily: 'Barlow Condensed', fontSize: 14, fontWeight: 700, letterSpacing: 1
                 }}
               >
+                {(u.level !== 'ok' || unitsWithRevisionIncidents.has(u.id)) && (
+                  <span className="incident-beacon incident-beacon-inline" />
+                )}
                 U{String(u.id).padStart(2,'0')} · {u.missing > 0 ? `${u.missing} faltante${u.missing>1?'s':''}` : `${u.low} bajo stock`}
               </button>
             ))}
@@ -95,9 +102,11 @@ export default function Dashboard() {
               const zones = buildZones(cfg.numCofres, cfg.hasTecho, cfg.hasTrasera)
               const s = unitSummary(items[id], zones)
               const level = unitAlertLevel(items[id], zones)
+              const hasIncident = level !== 'ok' || unitsWithRevisionIncidents.has(id)
               return (
                 <tr key={id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/unidades/${id}`)}>
                   <td>
+                    {hasIncident && <span className="incident-beacon" />}
                     <span style={{ fontFamily: 'Barlow Condensed', fontSize: 18, fontWeight: 800, letterSpacing: 1 }}>
                       U{String(id).padStart(2,'0')}
                     </span>

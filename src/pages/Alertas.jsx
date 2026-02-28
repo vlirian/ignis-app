@@ -8,6 +8,15 @@ export default function Alertas() {
   const navigate = useNavigate()
   const [sortMode, setSortMode] = useState('fecha_desc')
 
+  const goToUnitFromAlert = (alert) => {
+    const params = new URLSearchParams()
+    if (alert.zone) params.set('zone', alert.zone)
+    if (alert.zoneId) params.set('zoneId', alert.zoneId)
+    if (alert.item) params.set('item', alert.item)
+    params.set('src', 'alertas')
+    navigate(`/unidades/${alert.unitId}?${params.toString()}`)
+  }
+
   // ── Alertas de stock ─────────────────────────────────
   const stockAlerts = []
   UNIT_IDS.forEach(unitId => {
@@ -139,7 +148,11 @@ export default function Alertas() {
                 </thead>
                 <tbody>
                   {issueAlerts.map((a, i) => (
-                    <tr key={i} style={{ background: i % 2 === 0 ? 'rgba(230,126,34,0.03)' : 'transparent' }}>
+                    <tr
+                      key={i}
+                      style={{ background: i % 2 === 0 ? 'rgba(230,126,34,0.03)' : 'transparent', cursor: 'pointer' }}
+                      onClick={() => goToUnitFromAlert(a)}
+                    >
                       <td>
                         <span style={{ fontFamily: 'Barlow Condensed', fontSize: 16, fontWeight: 800, color: '#e67e22' }}>
                           U{String(a.unitId).padStart(2,'0')}
@@ -169,7 +182,7 @@ export default function Alertas() {
                           : 'Sin fecha'}
                       </td>
                       <td>
-                        <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/unidades/${a.unitId}`)}>
+                        <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); goToUnitFromAlert(a) }}>
                           Ver unidad
                         </button>
                       </td>
@@ -200,7 +213,7 @@ export default function Alertas() {
                 </thead>
                 <tbody>
                   {sortedStockAlerts.map((a, i) => (
-                    <tr key={i}>
+                    <tr key={i} style={{ cursor: 'pointer' }} onClick={() => goToUnitFromAlert(a)}>
                       <td>
                         <span className={`chip ${a.level === 'alert' ? 'chip-alert' : 'chip-warn'}`}>
                           {a.level === 'alert' ? '🔴 Crítico' : '🟡 Bajo stock'}
@@ -216,7 +229,7 @@ export default function Alertas() {
                       <td style={{ color: a.level === 'alert' ? 'var(--red-l)' : 'var(--yellow-l)', fontFamily: 'Roboto Mono', fontWeight: 600 }}>{a.qty}</td>
                       <td style={{ color: 'var(--mid)', fontFamily: 'Roboto Mono' }}>{a.min}</td>
                       <td>
-                        <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/unidades/${a.unitId}`)}>
+                        <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); goToUnitFromAlert(a) }}>
                           Ver unidad
                         </button>
                       </td>

@@ -4,6 +4,11 @@ import { UNIT_IDS, defaultUnitConfig, buildZones } from '../data/units'
 
 const AppContext = createContext(null)
 const ADMIN_EMAILS = ['estudiovic@gmail.com']
+const ROLE_PERMISSIONS = {
+  admin: ['view', 'edit', 'approve_requests', 'manage_roles', 'manage_system'],
+  operador: ['view', 'edit'],
+  lector: ['view'],
+}
 const BV_UNITS = {
   1: [3, 7, 19],
   2: [0, 6, 14],
@@ -80,7 +85,10 @@ export function AppProvider({ children }) {
   const [reviews, setReviews]     = useState({})
   const [itemStates, setItemStates] = useState({})
   const [revisionIncidents, setRevisionIncidents] = useState([])  // incidencias de informes BV de hoy
-  const isAdmin = ADMIN_EMAILS.includes((session?.user?.email || '').toLowerCase())
+  const [userRole, setUserRole] = useState('lector')
+  const currentEmail = (session?.user?.email || '').trim().toLowerCase()
+  const effectiveRole = userRole || (ADMIN_EMAILS.includes(currentEmail) ? 'admin' : 'lector')
+  const isAdmin = effectiveRole === 'admin' || ADMIN_EMAILS.includes(currentEmail)
   const todayDate = new Date().toISOString().slice(0, 10)
 
   // ── Auth ──────────────────────────────────────────────
@@ -117,6 +125,21 @@ export function AppProvider({ children }) {
   async function loadAll(silent = false) {
     if (!silent) setLoading(true)
     try {
+      // Rol del usuario actual (fallback seguro para admin hardcoded)
+      if (currentEmail) {
+        const fallbackRole = ADMIN_EMAILS.includes(currentEmail) ? 'admin' : 'lector'
+        let resolvedRole = fallbackRole
+        const { data: roleData, error: roleErr } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('email', currentEmail)
+          .maybeSingle()
+        if (!roleErr && roleData?.role) {
+          resolvedRole = roleData.role
+        }
+        setUserRole(resolvedRole)
+      }
+
       const { data: cfgData, error: cfgErr } = await supabase.from('unit_configs').select('*')
       if (cfgErr) throw cfgErr
 
@@ -220,7 +243,14 @@ export function AppProvider({ children }) {
     setState(emptyState())
     setReviews({})
     setItemStates({})
+    setUserRole('lector')
   }, [])
+
+  const hasPermission = useCallback((permission) => {
+    if (isAdmin) return true
+    const perms = ROLE_PERMISSIONS[effectiveRole] || []
+    return perms.includes(permission)
+  }, [isAdmin, effectiveRole])
 
   // ── Revisión de unidad ────────────────────────────────
   const refreshRevisionIncidents = useCallback(async () => {
@@ -498,6 +528,7 @@ export function AppProvider({ children }) {
   return (
     <AppContext.Provider value={{
       session, authReady, recovering, finishRecovery, isAdmin, logout,
+      role: effectiveRole, rolePermissions: ROLE_PERMISSIONS, hasPermission,
       configs: state.configs, items: state.items, reviews,
       loading, toast, showToast,
       itemStates, setUnitItemState, setUnitAllItemStates,

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useApp } from '../lib/AppContext'
 import { buildZones, zoneStatus, unitSummary, unitAlertLevel } from '../data/units'
 import Modal from '../components/Modal'
@@ -8,6 +8,7 @@ export default function UnidadDetail() {
   const { id } = useParams()
   const unitId = parseInt(id)
   const navigate = useNavigate()
+  const location = useLocation()
   const {
     configs, items, reviews, reviewUnit, updateQty, addItem, deleteItem, updateUnitConfig,
     showToast, session, itemStates: globalItemStates, revisionIncidents,
@@ -23,6 +24,10 @@ export default function UnidadDetail() {
   const [reviewLoading, setReviewLoading] = useState(false)
   const [issueModal, setIssueModal] = useState(null)  // { itemId, itemName, note }
   const [issueDraft, setIssueDraft] = useState('')
+  const [draftItemStates, setDraftItemStates] = useState({})
+  const [hasLocalIncidenceEdits, setHasLocalIncidenceEdits] = useState(false)
+  const [savingIncidences, setSavingIncidences] = useState(false)
+  const [focusedItemId, setFocusedItemId] = useState(null)
   const [newItem, setNewItem] = useState({ name: '', desc: '', qty: 1, min: 1 })
   const [cfgForm, setCfgForm] = useState(null)
 
@@ -60,6 +65,12 @@ export default function UnidadDetail() {
     return { ...localWithoutIssues, ...fromRevision }
   }, [globalItemStates, revisionIncidents, unitId, zones, items])
 
+  useEffect(() => {
+    if (!hasLocalIncidenceEdits) {
+      setDraftItemStates(itemStates)
+    }
+  }, [itemStates, hasLocalIncidenceEdits])
+
   const statusLabel = { ok: 'Completa', warn: 'Stock bajo', alert: 'Faltante' }
   const pillClass   = { ok: 'pill-ok', warn: 'pill-warn', alert: 'pill-alert' }
   const dotClass    = { ok: 'dot-ok', warn: 'dot-warn', alert: 'dot-alert' }
@@ -91,9 +102,52 @@ export default function UnidadDetail() {
 
   const handleIssueSave = async () => {
     if (!issueModal) return
-    await setUnitItemState(unitId, issueModal.itemId, { status: 'issue', note: issueDraft })
+    setDraftItemStates(prev => ({
+      ...prev,
+      [issueModal.itemId]: { status: 'issue', note: issueDraft },
+    }))
+    setHasLocalIncidenceEdits(true)
     setIssueModal(null)
     setIssueDraft('')
+  }
+
+  const guardedNavigate = (to) => {
+    if (hasLocalIncidenceEdits) {
+      const ok = window.confirm('Tienes cambios de incidencias sin guardar. ¿Seguro que quieres salir?')
+      if (!ok) return
+    }
+    navigate(to)
+  }
+
+  const saveIncidenceDraft = async () => {
+    const keySet = new Set([
+      ...Object.keys(itemStates || {}),
+      ...Object.keys(draftItemStates || {}),
+    ])
+    const changedIds = Array.from(keySet).filter(k => {
+      const base = itemStates?.[k] || { status: null, note: '' }
+      const draft = draftItemStates?.[k] || { status: null, note: '' }
+      return (base.status || null) !== (draft.status || null) || String(base.note || '') !== String(draft.note || '')
+    })
+    if (changedIds.length === 0) {
+      showToast('No hay cambios pendientes', 'warn')
+      setHasLocalIncidenceEdits(false)
+      return
+    }
+    setSavingIncidences(true)
+    for (const itemId of changedIds) {
+      const draft = draftItemStates?.[itemId] || { status: null, note: '' }
+      await setUnitItemState(unitId, itemId, { status: draft.status || null, note: draft.note || '' })
+    }
+    setSavingIncidences(false)
+    setHasLocalIncidenceEdits(false)
+    showToast('Incidencias guardadas', 'ok')
+  }
+
+  const resetIncidenceDraft = () => {
+    setDraftItemStates(itemStates)
+    setHasLocalIncidenceEdits(false)
+    showToast('Cambios descartados', 'warn')
   }
 
   const openCfg = () => {
@@ -103,7 +157,51 @@ export default function UnidadDetail() {
 
   useEffect(() => {
     setSelectedZone(null)
+    setFocusedItemId(null)
+    setHasLocalIncidenceEdits(false)
   }, [unitId])
+
+  useEffect(() => {
+    const onBeforeUnload = (e) => {
+      if (!hasLocalIncidenceEdits) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [hasLocalIncidenceEdits])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const zoneParam = String(params.get('zone') || '').trim()
+    const zoneIdParam = String(params.get('zoneId') || '').trim()
+    const itemParam = String(params.get('item') || '').trim().toLowerCase()
+    if (!zoneParam && !zoneIdParam && !itemParam) return
+
+    const zoneMatch = allZones.find(z =>
+      String(z.id).trim().toLowerCase() === zoneIdParam.toLowerCase() ||
+      String(z.id).trim().toLowerCase() === zoneParam.toLowerCase() ||
+      String(z.label).trim().toLowerCase() === zoneParam.toLowerCase()
+    )
+
+    const fallbackZone = allZones.find(z => {
+      if (!itemParam) return false
+      return (items[unitId]?.[z.id] || []).some(it => String(it.name).trim().toLowerCase() === itemParam)
+    })
+
+    const finalZone = zoneMatch || fallbackZone
+    if (finalZone?.id) setSelectedZone(finalZone.id)
+
+    if (itemParam) {
+      const searchZones = finalZone ? [finalZone] : allZones
+      let found = null
+      searchZones.forEach(z => {
+        if (found) return
+        found = (items[unitId]?.[z.id] || []).find(it => String(it.name).trim().toLowerCase() === itemParam) || null
+      })
+      setFocusedItemId(found?.id || null)
+    }
+  }, [location.search, unitId, allZones, items])
 
   const zonesToShow = selectedZone ? allZones.filter(z => z.id === selectedZone) : allZones
 
@@ -112,7 +210,7 @@ export default function UnidadDetail() {
 
       {/* Breadcrumb */}
       <div style={{ fontSize: 12, color: 'var(--mid)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ cursor: 'pointer', color: 'var(--light)' }} onClick={() => navigate('/unidades')}>Unidades</span>
+        <span style={{ cursor: 'pointer', color: 'var(--light)' }} onClick={() => guardedNavigate('/unidades')}>Unidades</span>
         <span>›</span>
         <span>U{String(unitId).padStart(2,'0')}</span>
       </div>
@@ -129,6 +227,16 @@ export default function UnidadDetail() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          {hasLocalIncidenceEdits && (
+            <>
+              <button className="btn btn-ghost btn-sm" onClick={resetIncidenceDraft} disabled={savingIncidences}>
+                Descartar cambios
+              </button>
+              <button className="btn btn-primary btn-sm" onClick={saveIncidenceDraft} disabled={savingIncidences}>
+                {savingIncidences ? 'Guardando...' : 'Guardar cambios de incidencias'}
+              </button>
+            </>
+          )}
           <button className="btn btn-ghost btn-sm" onClick={openCfg}>⚙ Configurar</button>
           <button className="btn btn-ghost btn-sm" onClick={() => setReviewModal(true)}>✔ Revisar unidad</button>
             <button className="btn btn-primary btn-sm" onClick={() => setAddModal(zones[0]?.id || allZones[0]?.id)}>＋ Añadir artículo</button>
@@ -210,14 +318,22 @@ export default function UnidadDetail() {
             key={zone.id}
             zone={zone}
             zoneItems={items[unitId][zone.id] || []}
-            itemStates={itemStates}
-            onSetOk={(itemId) => setUnitItemState(unitId, itemId, itemStates[itemId]?.status === 'ok' ? { status: null, note: '' } : { status: 'ok', note: '' })}
-            onSetIssue={(itemId, itemName) => { setIssueDraft(itemStates[itemId]?.note || ''); setIssueModal({ itemId, itemName, zoneId: zone.id, zoneLabel: zone.label }) }}
+            itemStates={draftItemStates}
+            focusedItemId={focusedItemId}
+            onSetOk={(itemId) => {
+              const current = draftItemStates[itemId]?.status || null
+              setDraftItemStates(prev => ({ ...prev, [itemId]: { status: current === 'ok' ? null : 'ok', note: '' } }))
+              setHasLocalIncidenceEdits(true)
+            }}
+            onSetIssue={(itemId, itemName) => { setIssueDraft(draftItemStates[itemId]?.note || ''); setIssueModal({ itemId, itemName, zoneId: zone.id, zoneLabel: zone.label }) }}
             onMarkAll={(zoneItems) => {
-              const allOk = zoneItems.every(i => itemStates[i.id]?.status === 'ok')
+              const allOk = zoneItems.every(i => draftItemStates[i.id]?.status === 'ok')
+              const next = { ...draftItemStates }
               zoneItems.forEach(i => {
-                setUnitItemState(unitId, i.id, { status: allOk ? null : 'ok', note: '' })
+                next[i.id] = { status: allOk ? null : 'ok', note: '' }
               })
+              setDraftItemStates(next)
+              setHasLocalIncidenceEdits(true)
             }}
             onAdd={() => setAddModal(zone.id)}
             onAdjust={(itemId, delta) => { updateQty(unitId, zone.id, itemId, delta) }}
@@ -508,7 +624,7 @@ function ZoneBlock({ zone, status, items, selected, onClick, flex = 1, minH = 80
   )
 }
 
-function ZoneCard({ zone, zoneItems, itemStates, onSetOk, onSetIssue, onMarkAll, onAdd, onAdjust, onDelete }) {
+function ZoneCard({ zone, zoneItems, itemStates, focusedItemId, onSetOk, onSetIssue, onMarkAll, onAdd, onAdjust, onDelete }) {
   const status = zoneStatus(zoneItems)
   const chipMap = { ok: 'chip-ok', warn: 'chip-warn', alert: 'chip-alert' }
   const label   = { ok: 'OK', warn: 'Stock bajo', alert: 'Faltante' }
@@ -552,7 +668,7 @@ function ZoneCard({ zone, zoneItems, itemStates, onSetOk, onSetIssue, onMarkAll,
         <div style={{ padding: '16px 18px', fontSize: 13, color: 'var(--mid)' }}>Sin artículos.</div>
       ) : (
         zoneItems.map(item => (
-          <ItemRow key={item.id} item={item} itemState={itemStates[item.id] || { status: null, note: '' }} onSetOk={() => onSetOk(item.id)} onSetIssue={() => onSetIssue(item.id, item.name)} onAdjust={d => onAdjust(item.id, d)} onDelete={() => onDelete(item.id, item.name)} />
+          <ItemRow key={item.id} item={item} highlighted={String(item.id) === String(focusedItemId)} itemState={itemStates[item.id] || { status: null, note: '' }} onSetOk={() => onSetOk(item.id)} onSetIssue={() => onSetIssue(item.id, item.name)} onAdjust={d => onAdjust(item.id, d)} onDelete={() => onDelete(item.id, item.name)} />
         ))
       )}
 
@@ -570,7 +686,7 @@ function ZoneCard({ zone, zoneItems, itemStates, onSetOk, onSetIssue, onMarkAll,
   )
 }
 
-function ItemRow({ item, itemState, onSetOk, onSetIssue, onAdjust, onDelete }) {
+function ItemRow({ item, itemState, highlighted = false, onSetOk, onSetIssue, onAdjust, onDelete }) {
   const [hover, setHover] = useState(false)
   const status    = itemState?.status || null   // null | 'ok' | 'issue'
   const note      = itemState?.note || ''
@@ -583,12 +699,22 @@ function ItemRow({ item, itemState, onSetOk, onSetIssue, onAdjust, onDelete }) {
     ? 'rgba(39,174,96,0.05)'
     : status === 'issue'
       ? 'rgba(192,57,43,0.07)'
-      : hover ? 'rgba(255,255,255,0.025)' : 'transparent'
+      : highlighted ? 'rgba(52,152,219,0.12)' : hover ? 'rgba(255,255,255,0.025)' : 'transparent'
 
   return (
     <div style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
       <div
-        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 18px', background: rowBg, transition: 'background 0.15s', opacity: status === 'ok' ? 0.75 : 1 }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '9px 18px',
+          background: rowBg,
+          transition: 'background 0.15s',
+          opacity: status === 'ok' ? 0.75 : 1,
+          outline: highlighted ? '1px solid rgba(52,152,219,0.5)' : 'none',
+          outlineOffset: -1,
+        }}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
       >

@@ -360,6 +360,48 @@ a { text-decoration: none; color: inherit; }
 }
 .animate-in { animation: slideUp 0.25s ease both; }
 
+/* ── INCIDENT BEACON ── */
+.incident-beacon {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--red-l);
+  box-shadow: 0 0 0 rgba(231, 76, 60, 0.6);
+  margin-right: 8px;
+  vertical-align: middle;
+  animation: incidentPulse 1.1s ease-in-out infinite;
+}
+
+.incident-beacon-inline {
+  margin-right: 6px;
+}
+
+.incident-beacon-card {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  margin-right: 0;
+}
+
+@keyframes incidentPulse {
+  0% {
+    transform: scale(0.9);
+    box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.6);
+    opacity: 0.95;
+  }
+  70% {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 8px rgba(231, 76, 60, 0);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.9);
+    box-shadow: 0 0 0 0 rgba(231, 76, 60, 0);
+    opacity: 0.9;
+  }
+}
+
 /* ── RESPONSIVE ── */
 @media (max-width: 1024px) {
   #hamburger { display: inline-flex; }
