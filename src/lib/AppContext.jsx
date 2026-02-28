@@ -78,8 +78,8 @@ export function AppProvider({ children }) {
   }, [authReady, session?.user?.id])
 
   // ── Carga de datos ────────────────────────────────────
-  async function loadAll() {
-    setLoading(true)
+  async function loadAll(silent = false) {
+    if (!silent) setLoading(true)
     try {
       const { data: cfgData, error: cfgErr } = await supabase.from('unit_configs').select('*')
       if (cfgErr) throw cfgErr
@@ -144,9 +144,31 @@ export function AppProvider({ children }) {
       console.error('Error cargando datos:', err)
       showToast('Error de conexión', 'error')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
+
+  // Refresco automático cuando vuelves a la app o cada minuto
+  useEffect(() => {
+    if (!session) return
+
+    const refreshSilently = () => { loadAll(true) }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') refreshSilently()
+    }
+
+    window.addEventListener('focus', refreshSilently)
+    document.addEventListener('visibilitychange', onVisibility)
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') refreshSilently()
+    }, 60000)
+
+    return () => {
+      window.removeEventListener('focus', refreshSilently)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.clearInterval(intervalId)
+    }
+  }, [session?.user?.id])
 
   // ── Toast ─────────────────────────────────────────────
   const showToast = useCallback((msg, type = 'ok') => {
