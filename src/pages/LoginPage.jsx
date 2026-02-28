@@ -9,12 +9,14 @@ export default function LoginPage() {
 
   const handleLogin = async (e) => {
     e.preventDefault()
-    if (!email || !password) { setError('Introduce email y contraseña'); return }
+    const cleanEmail = email.trim()
+    const cleanPassword = password.trim()
+    if (!cleanEmail || !cleanPassword) { setError('Introduce email y contraseña'); return }
     setLoading(true)
     setError('')
-    const { error: err } = await supabase.auth.signInWithPassword({ email, password })
+    const { error: err } = await supabase.auth.signInWithPassword({ email: cleanEmail, password: cleanPassword })
     setLoading(false)
-    if (err) setError('Credenciales incorrectas')
+    if (err) setError(err.message || 'Error de autenticación')
   }
 
   return (
