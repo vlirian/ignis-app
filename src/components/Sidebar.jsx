@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import { buildZones, unitAlertLevel } from '../data/units'
 import styles from './Sidebar.module.css'
 
-const BV_UNITS = {
+const DEFAULT_BV_UNITS = {
   1: [3, 7, 19],
   2: [0, 6, 14],
   3: [1, 16, 22],
@@ -34,12 +34,13 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10)
 }
 
-function getActiveUnitsForBv(bvId, configs) {
-  return (BV_UNITS[bvId] || []).filter(unitId => configs?.[unitId]?.isActive !== false)
+function getActiveUnitsForBv(bvId, configs, bvUnits = DEFAULT_BV_UNITS) {
+  return (bvUnits[bvId] || []).filter(unitId => configs?.[unitId]?.isActive !== false)
 }
 
 export default function Sidebar({ open, onClose }) {
-  const { configs, items, isAdmin, revisionIncidents } = useApp()
+  const { configs, items, isAdmin, revisionIncidents, bvUnits } = useApp()
+  const effectiveBvUnits = bvUnits || DEFAULT_BV_UNITS
   const navItems = NAV.filter(item => !item.adminOnly || isAdmin)
   const [revisionPending, setRevisionPending] = useState(false)
 
@@ -71,12 +72,12 @@ export default function Sidebar({ open, onClose }) {
 
   const activeUnitsByBv = useMemo(() => {
     const map = {}
-    Object.keys(BV_UNITS).forEach((raw) => {
+    Object.keys(effectiveBvUnits).forEach((raw) => {
       const bvId = Number(raw)
-      map[bvId] = getActiveUnitsForBv(bvId, configs)
+      map[bvId] = getActiveUnitsForBv(bvId, configs, effectiveBvUnits)
     })
     return map
-  }, [configs])
+  }, [configs, effectiveBvUnits])
 
   useEffect(() => {
     let mounted = true
@@ -95,7 +96,7 @@ export default function Sidebar({ open, onClose }) {
         }
 
         let pending = false
-        for (const raw of Object.keys(BV_UNITS)) {
+        for (const raw of Object.keys(effectiveBvUnits)) {
           const bvId = Number(raw)
           const requiredUnits = activeUnitsByBv[bvId] || []
           if (requiredUnits.length === 0) continue
@@ -130,7 +131,7 @@ export default function Sidebar({ open, onClose }) {
       window.clearInterval(timer)
       window.removeEventListener('focus', onFocus)
     }
-  }, [activeUnitsByBv])
+  }, [activeUnitsByBv, effectiveBvUnits])
 
   return (
     <>

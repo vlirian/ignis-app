@@ -10,7 +10,7 @@ const ROLE_PERMISSIONS = {
   lector: ['view'],
 }
 const PHOTO_NOTES_MARKER = '[[FOTOS_REVISION]]'
-const BV_UNITS = {
+const DEFAULT_BV_UNITS = {
   1: [3, 7, 19],
   2: [0, 6, 14],
   3: [1, 16, 22],
@@ -52,9 +52,16 @@ function parseNotesAndPhotoUrls(raw = '') {
   return { notes, photoUrls }
 }
 
-function unitToBv(unitId) {
+function composeNotesWithPhotoUrls(notes = '', photoUrls = []) {
+  const cleanNotes = String(notes || '').trim()
+  const cleanUrls = (photoUrls || []).map(s => String(s || '').trim()).filter(Boolean)
+  if (cleanUrls.length === 0) return cleanNotes
+  return `${cleanNotes}${cleanNotes ? '\n\n' : ''}${PHOTO_NOTES_MARKER}\n${cleanUrls.join('\n')}`
+}
+
+function unitToBv(unitId, bvUnits = DEFAULT_BV_UNITS) {
   const uid = Number(unitId)
-  for (const [bv, units] of Object.entries(BV_UNITS)) {
+  for (const [bv, units] of Object.entries(bvUnits || {})) {
     if (units.includes(uid)) return Number(bv)
   }
   return 1
@@ -115,6 +122,7 @@ export function AppProvider({ children }) {
   const [reviews, setReviews]     = useState({})
   const [itemStates, setItemStates] = useState({})
   const [revisionIncidents, setRevisionIncidents] = useState([])  // incidencias de informes BV de hoy
+  const [bvUnits, setBvUnits] = useState(DEFAULT_BV_UNITS)
   const [userRole, setUserRole] = useState('lector')
   const loggedSessionIds = useRef(new Set())
   const currentEmail = (session?.user?.email || '').trim().toLowerCase()
@@ -250,6 +258,25 @@ export function AppProvider({ children }) {
           id: row.id, name: row.name, desc: row.description, qty: row.qty, min: row.min_qty
         })
       })
+
+      const assignmentMap = { ...DEFAULT_BV_UNITS }
+      const { data: assignmentRows, error: assignmentErr } = await supabase
+        .from('bv_unit_assignments')
+        .select('unit_id,bombero_id')
+      if (!assignmentErr && Array.isArray(assignmentRows)) {
+        Object.keys(assignmentMap).forEach((k) => { assignmentMap[k] = [] })
+        assignmentRows.forEach((row) => {
+          const unitId = Number(row.unit_id)
+          const bvId = Number(row.bombero_id)
+          if (!Number.isFinite(unitId) || !Number.isFinite(bvId)) return
+          if (!assignmentMap[bvId]) assignmentMap[bvId] = []
+          if (!assignmentMap[bvId].includes(unitId)) assignmentMap[bvId].push(unitId)
+        })
+        Object.keys(assignmentMap).forEach((k) => {
+          assignmentMap[k] = (assignmentMap[k] || []).sort((a, b) => a - b)
+        })
+      }
+      setBvUnits(assignmentMap)
       setState({ configs, items })
 
       const { data: revData } = await supabase
@@ -413,8 +440,16 @@ export function AppProvider({ children }) {
     return null
   }, [state.items, state.configs])
 
-  const syncIncidentToReports = useCallback(async ({ unitId, itemId, zoneLabel, itemName, note = '', source = 'unidad' }) => {
-    const targetBomberoId = unitToBv(unitId)
+  const syncIncidentToReports = useCallback(async ({
+    unitId,
+    itemId,
+    zoneLabel,
+    itemName,
+    note = '',
+    source = 'unidad',
+    photoUrls = [],
+  }) => {
+    const targetBomberoId = unitToBv(unitId, bvUnits)
     const keyMatch = (inc) => {
       const idMatch = inc?.itemId && String(inc.itemId) === String(itemId)
       const fallback = String(inc?.zone || '').trim().toLowerCase() === String(zoneLabel || '').trim().toLowerCase()
@@ -444,6 +479,11 @@ export function AppProvider({ children }) {
       source,
     })
 
+    const prevNotes = String(todayRow?.general_notes || '')
+    const parsed = parseNotesAndPhotoUrls(prevNotes)
+    const mergedPhotoUrls = Array.from(new Set([...(parsed.photoUrls || []), ...(photoUrls || [])]))
+    const nextGeneralNotes = composeNotesWithPhotoUrls(parsed.notes || '', mergedPhotoUrls)
+
     if (todayRow?.id) {
       const { error: updErr } = await supabase
         .from('revision_reports')
@@ -451,6 +491,7 @@ export function AppProvider({ children }) {
           incidents: merged,
           is_ok: false,
           reviewed_by: session?.user?.email || 'unidades',
+          general_notes: nextGeneralNotes,
         })
         .eq('id', todayRow.id)
       if (updErr) return { ok: false, error: updErr.message || 'update_error' }
@@ -463,7 +504,7 @@ export function AppProvider({ children }) {
           unit_id: unitId,
           is_ok: false,
           incidents: merged,
-          general_notes: '',
+          general_notes: nextGeneralNotes,
           reviewed_by: session?.user?.email || 'unidades',
         })
       if (insErr) return { ok: false, error: insErr.message || 'insert_error' }
@@ -471,7 +512,7 @@ export function AppProvider({ children }) {
 
     await refreshRevisionIncidents()
     return { ok: true }
-  }, [todayDate, refreshRevisionIncidents, session?.user?.email])
+  }, [todayDate, refreshRevisionIncidents, session?.user?.email, bvUnits])
 
   const clearIncidentFromReports = useCallback(async ({ unitId, itemId, zoneLabel, itemName }) => {
     const keyMatch = (inc) => {
@@ -504,7 +545,7 @@ export function AppProvider({ children }) {
   }, [refreshRevisionIncidents])
 
   // ── Item states (revisión por artículo) ───────────────
-  const setUnitItemState = useCallback(async (unitId, itemId, state) => {
+  const setUnitItemState = useCallback(async (unitId, itemId, state, options = {}) => {
     if (!hasPermission('edit')) {
       showToast('Solo lectura: no puedes modificar inventario', 'warn')
       return
@@ -538,6 +579,7 @@ export function AppProvider({ children }) {
         itemName: meta.itemName,
         note: state?.note || '',
         source: 'unidad',
+        photoUrls: Array.isArray(options?.photoUrls) ? options.photoUrls : [],
       })
       if (!sync?.ok) showToast(`No se pudo sincronizar: ${sync.error || 'error'}`, 'error')
       await logInventoryChange({
@@ -633,7 +675,7 @@ export function AppProvider({ children }) {
     let oldQty = null
     setState(prev => {
       const zoneItems = (prev.items[unitId][zoneId] || []).map(it => {
-        if (it.id === itemId) {
+        if (String(it.id) === String(itemId)) {
           oldQty = it.qty
           itemName = it.name
           newQty = Math.max(0, it.qty + delta)
@@ -643,8 +685,15 @@ export function AppProvider({ children }) {
       })
       return { ...prev, items: { ...prev.items, [unitId]: { ...prev.items[unitId], [zoneId]: zoneItems } } }
     })
+    if (!Number.isFinite(newQty)) {
+      showToast('Error al guardar cantidad', 'error')
+      return { ok: false, error: 'item_not_found_or_qty_invalid' }
+    }
     const { error } = await supabase.from('unit_items').update({ qty: newQty }).eq('id', itemId)
-    if (error) showToast('Error al guardar', 'error')
+    if (error) {
+      showToast('Error al guardar', 'error')
+      return { ok: false, error: error.message || 'update_error' }
+    }
     if (!error) {
       await logInventoryChange({
         unitId,
@@ -657,6 +706,7 @@ export function AppProvider({ children }) {
         newValue: { qty: newQty },
       })
     }
+    return { ok: true, qty: newQty }
   }, [showToast, logInventoryChange, hasPermission])
 
   const addItem = useCallback(async (unitId, zoneId, item) => {
@@ -843,6 +893,49 @@ export function AppProvider({ children }) {
     return { ok: true }
   }, [isAdmin, state.configs, logInventoryChange])
 
+  const assignUnitToBombero = useCallback(async (unitId, bomberoId) => {
+    if (!isAdmin) return { ok: false, error: 'not_admin' }
+    const uid = Number(unitId)
+    const bid = Number(bomberoId)
+    if (!Number.isFinite(uid) || uid < 0 || !Number.isFinite(bid) || bid < 1 || bid > 7) {
+      return { ok: false, error: 'invalid_input' }
+    }
+
+    const { error } = await supabase
+      .from('bv_unit_assignments')
+      .upsert({
+        unit_id: uid,
+        bombero_id: bid,
+        updated_by: session?.user?.email || null,
+      }, { onConflict: 'unit_id' })
+
+    if (error) return { ok: false, error: error.message || 'db_error' }
+
+    setBvUnits(prev => {
+      const next = { ...(prev || DEFAULT_BV_UNITS) }
+      Object.keys(next).forEach((k) => {
+        next[k] = (next[k] || []).filter(u => Number(u) !== uid)
+      })
+      if (!next[bid]) next[bid] = []
+      next[bid].push(uid)
+      Object.keys(next).forEach((k) => {
+        next[k] = Array.from(new Set(next[k].map(Number))).sort((a, b) => a - b)
+      })
+      return next
+    })
+
+    await logInventoryChange({
+      unitId: uid,
+      changeType: 'bv_assignment_update',
+      detail: `Reasignada a BV${bid}`,
+      previousValue: { bv: unitToBv(uid, bvUnits) },
+      newValue: { bv: bid },
+      metadata: { type: 'revision_assignment' },
+    })
+
+    return { ok: true }
+  }, [isAdmin, session?.user?.email, logInventoryChange, bvUnits])
+
   const refreshInventory = useCallback(async () => {
     await loadAll(true)
   }, [])
@@ -851,6 +944,7 @@ export function AppProvider({ children }) {
     <AppContext.Provider value={{
       session, authReady, recovering, finishRecovery, isAdmin, logout,
       role: effectiveRole, rolePermissions: ROLE_PERMISSIONS, hasPermission,
+      bvUnits, assignUnitToBombero,
       configs: state.configs, items: state.items, reviews,
       loading, toast, showToast,
       itemStates, setUnitItemState, setUnitAllItemStates,

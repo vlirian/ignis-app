@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase'
 import { buildAndStoreDailyIncidentReport } from '../lib/dailyIncidentReport'
 
 // ── Asignación BV → Unidades ──────────────────────────────
-const BV_UNITS = {
+const DEFAULT_BV_UNITS = {
   1: [3, 7, 19],
   2: [0, 6, 14],
   3: [1, 16, 22],
@@ -26,9 +26,80 @@ const BV_COLORS = {
   7: { bg: 'rgba(241,196,15,0.12)', border: '#F39C12', text: '#F1C40F' },
 }
 const PHOTO_NOTES_MARKER = '[[FOTOS_REVISION]]'
+const MISSING_NOTE = 'Marcado por bombero: NO está'
+const INCIDENT_NOTE = 'Marcado por bombero: PRESENTA incidencia'
+const REVISION_DRAFT_PREFIX = 'ignis:revision-draft:'
 
-function getActiveUnitsForBv(bvId, configs) {
-  return (BV_UNITS[bvId] || []).filter(unitId => configs?.[unitId]?.isActive !== false)
+function getDraftStorageKey(date, bomberoId, email) {
+  return `${REVISION_DRAFT_PREFIX}${date}:${bomberoId}:${String(email || 'anon').toLowerCase()}`
+}
+
+function serializeReviewDraft(state) {
+  return {
+    date: state.date,
+    bomberoId: state.bomberoId,
+    activeUnitIdx: state.activeUnitIdx,
+    units: (state.units || []).map(u => ({
+      unitId: u.unitId,
+      itemChecks: u.itemChecks || {},
+      itemNotes: u.itemNotes || {},
+      incidents: u.incidents || [],
+      qtyOverrides: u.qtyOverrides || {},
+      notes: u.notes || '',
+      done: Boolean(u.done),
+      attachments: (u.attachments || [])
+        .map(a => a?.url)
+        .filter(url => url && !String(url).startsWith('blob:')),
+    })),
+  }
+}
+
+function hydrateReviewDraftUnits(baseUnits, draftUnits) {
+  const byUnit = new Map((draftUnits || []).map(u => [String(u.unitId), u]))
+  return (baseUnits || []).map(base => {
+    const d = byUnit.get(String(base.unitId))
+    if (!d) return base
+
+    const mergedChecks = { ...base.itemChecks }
+    for (const [k, v] of Object.entries(d.itemChecks || {})) {
+      if (!Object.prototype.hasOwnProperty.call(base.itemChecks || {}, k)) continue
+      if (v === 'ok' || v === 'issue' || v === null) mergedChecks[k] = v
+    }
+
+    const mergedNotes = { ...base.itemNotes }
+    for (const [k, v] of Object.entries(d.itemNotes || {})) {
+      if (!Object.prototype.hasOwnProperty.call(base.itemChecks || {}, k)) continue
+      mergedNotes[k] = String(v || '')
+    }
+
+    const mergedQty = { ...(base.qtyOverrides || {}) }
+    for (const [k, v] of Object.entries(d.qtyOverrides || {})) {
+      if (!Object.prototype.hasOwnProperty.call(base.itemChecks || {}, k)) continue
+      const n = Number(v)
+      if (Number.isFinite(n)) mergedQty[k] = n
+    }
+
+    const draftAttachments = (d.attachments || []).map((url, idx) => makeLocalAttachmentFromUrl(url, idx))
+    const baseUrls = new Set((base.attachments || []).map(a => a?.url).filter(Boolean))
+    const attachments = [
+      ...(base.attachments || []),
+      ...draftAttachments.filter(a => !baseUrls.has(a.url)),
+    ]
+
+    return {
+      ...base,
+      itemChecks: mergedChecks,
+      itemNotes: mergedNotes,
+      incidents: Array.isArray(d.incidents) ? d.incidents : base.incidents,
+      qtyOverrides: mergedQty,
+      notes: typeof d.notes === 'string' ? d.notes : base.notes,
+      attachments,
+      done: Boolean(d.done),
+    }
+  })
+}
+function getActiveUnitsForBv(bvId, configs, bvUnits = DEFAULT_BV_UNITS) {
+  return (bvUnits[bvId] || []).filter(unitId => configs?.[unitId]?.isActive !== false)
 }
 
 function todayStr() {
@@ -80,7 +151,7 @@ function composeNotesWithPhotoUrls(notes = '', photoUrls = []) {
 // ── VISTA PRINCIPAL ───────────────────────────────────────
 export default function Revision() {
   const location = useLocation()
-  const { configs, items, session, revisionIncidents, refreshRevisionIncidents, showToast, hasPermission } = useApp()
+  const { configs, items, session, revisionIncidents, refreshRevisionIncidents, showToast, hasPermission, bvUnits } = useApp()
   const now = new Date()
   const lastAutoOpenNonce = useRef(null)
 
@@ -95,10 +166,59 @@ export default function Revision() {
   const [loadingReports, setLoadingReports] = useState(true)
   const [historyModal, setHistoryModal] = useState(null)
   const [saving, setSaving] = useState(false)
-  const [issueNoteModal, setIssueNoteModal] = useState(null) // { itemId, itemName, zoneName, currentNote }
+  const [issueNoteModal, setIssueNoteModal] = useState(null) // { itemId, itemName, zoneName, editOnly }
   const [issueNoteDraft, setIssueNoteDraft] = useState('')
+  const [issueNoteType, setIssueNoteType] = useState('incident') // incident | missing
+  const [issueNoteFiles, setIssueNoteFiles] = useState([])
 
   useEffect(() => { loadReports() }, [viewYear, viewMonth])
+
+  function saveDraftSnapshot(state, silent = true) {
+    try {
+      if (!state || typeof window === 'undefined') return
+      const email = session?.user?.email || 'anon'
+      const key = getDraftStorageKey(state.date, state.bomberoId, email)
+      const payload = { ...serializeReviewDraft(state), savedAt: new Date().toISOString() }
+      window.localStorage.setItem(key, JSON.stringify(payload))
+      if (!silent) showToast('Progreso guardado', 'ok')
+    } catch (e) {
+      console.warn('No se pudo guardar borrador de revisión:', e)
+      if (!silent) showToast('No se pudo guardar el progreso', 'error')
+    }
+  }
+
+  function loadDraftSnapshot(date, bomberoId) {
+    try {
+      if (typeof window === 'undefined') return null
+      const email = session?.user?.email || 'anon'
+      const key = getDraftStorageKey(date, bomberoId, email)
+      const raw = window.localStorage.getItem(key)
+      if (!raw) return null
+      const parsed = JSON.parse(raw)
+      if (!parsed || !Array.isArray(parsed.units)) return null
+      return parsed
+    } catch (e) {
+      console.warn('No se pudo cargar borrador de revisión:', e)
+      return null
+    }
+  }
+
+  function clearDraftSnapshot(date, bomberoId) {
+    try {
+      if (typeof window === 'undefined') return
+      const email = session?.user?.email || 'anon'
+      const key = getDraftStorageKey(date, bomberoId, email)
+      window.localStorage.removeItem(key)
+    } catch (e) {
+      console.warn('No se pudo limpiar borrador de revisión:', e)
+    }
+  }
+
+  useEffect(() => {
+    if (view !== 'review' || !reviewState) return
+    const t = setTimeout(() => saveDraftSnapshot(reviewState, true), 600)
+    return () => clearTimeout(t)
+  }, [view, reviewState, session?.user?.email])
 
   async function loadReports() {
     setLoadingReports(true)
@@ -121,7 +241,7 @@ export default function Revision() {
 
   // Iniciar revisión — crea estructura con todos los artículos de todas las unidades
   function startReview(date, bomberoId, preferredUnitId = null) {
-    const unitIds = getActiveUnitsForBv(bomberoId, configs)
+    const unitIds = getActiveUnitsForBv(bomberoId, configs, bvUnits)
     if (unitIds.length === 0) {
       showToast('Este bombero no tiene unidades activas asignadas', 'warn')
       return
@@ -142,6 +262,7 @@ export default function Revision() {
       const itemChecks = {}
       const itemNotes = {}
       const incidents = []
+      const qtyOverrides = {}
       const reportRowsForUnit = (reportIndex[`${date}-${bomberoId}`] || []).filter(r => r.unit_id === unitId)
       const latestGeneralNotes = reportRowsForUnit[0]?.general_notes || ''
       const { notes: parsedNotes, photoUrls } = parseNotesAndPhotoUrls(latestGeneralNotes)
@@ -175,6 +296,9 @@ export default function Revision() {
           if (match) {
             itemChecks[item.id] = 'issue'
             itemNotes[item.id] = match.note || ''
+            if (String(match.note || '').toLowerCase().includes('no está') || String(match.note || '').toLowerCase().includes('falta')) {
+              qtyOverrides[item.id] = 0
+            }
             incidents.push({
               _itemId: item.id,
               itemId: item.id,
@@ -191,16 +315,24 @@ export default function Revision() {
         itemChecks,
         itemNotes,
         incidents,
+        qtyOverrides,
         notes: parsedNotes || '',
         attachments: photoUrls.map((u, idx) => makeLocalAttachmentFromUrl(u, idx)),
         done: false,
       }
     })
 
+    const draft = loadDraftSnapshot(date, bomberoId)
+    const hydratedUnits = draft?.units ? hydrateReviewDraftUnits(units, draft.units) : units
     const preferredIdx = Number.isFinite(Number(preferredUnitId))
-      ? units.findIndex(u => Number(u.unitId) === Number(preferredUnitId))
+      ? hydratedUnits.findIndex(u => Number(u.unitId) === Number(preferredUnitId))
       : -1
-    setReviewState({ date, bomberoId, activeUnitIdx: preferredIdx >= 0 ? preferredIdx : null, units })
+    const draftActiveIdx = Number.isInteger(draft?.activeUnitIdx) ? Number(draft.activeUnitIdx) : -1
+    const activeUnitIdx = (draftActiveIdx >= 0 && draftActiveIdx < hydratedUnits.length)
+      ? draftActiveIdx
+      : (preferredIdx >= 0 ? preferredIdx : null)
+    setReviewState({ date, bomberoId, activeUnitIdx, units: hydratedUnits })
+    if (draft) showToast('Progreso recuperado', 'ok')
     setView('review')
   }
 
@@ -213,8 +345,8 @@ export default function Revision() {
     if (!Number.isFinite(targetUnitId)) return
 
     let targetBv = null
-    for (const [bvId] of Object.entries(BV_UNITS)) {
-      const activeUnits = getActiveUnitsForBv(Number(bvId), configs)
+    for (const [bvId] of Object.entries(bvUnits || DEFAULT_BV_UNITS)) {
+      const activeUnits = getActiveUnitsForBv(Number(bvId), configs, bvUnits || DEFAULT_BV_UNITS)
       if ((activeUnits || []).includes(targetUnitId)) {
         targetBv = Number(bvId)
         break
@@ -254,10 +386,14 @@ export default function Revision() {
     for (const unit of units) {
       const cfg   = configs[unit.unitId]
       const zones = cfg ? buildZones(cfg.numCofres, cfg.hasTecho, cfg.hasTrasera) : []
+      const qtyOverrides = unit.qtyOverrides || {}
       const resolveItemMeta = (id) => {
         for (const z of zones) {
           const found = (items[unit.unitId]?.[z.id] || []).find(i => String(i.id) === String(id))
-          if (found) return { itemId: id, name: found.name, zone: z.label, isMissing: found.qty === 0 }
+          if (found) {
+            const effQty = Object.prototype.hasOwnProperty.call(qtyOverrides, id) ? Number(qtyOverrides[id]) : Number(found.qty)
+            return { itemId: id, name: found.name, zone: z.label, isMissing: effQty === 0, qty: effQty }
+          }
         }
         return { itemId: id, name: id, zone: '', isMissing: false }
       }
@@ -333,6 +469,10 @@ export default function Revision() {
 
       const generalNotes = composeNotesWithPhotoUrls(unit.notes, [...existingUrls, ...uploadedUrls])
 
+      for (const [itemId, nextQty] of Object.entries(qtyOverrides || {})) {
+        await supabase.from('unit_items').update({ qty: Number(nextQty) || 0 }).eq('id', itemId)
+      }
+
       await supabase.from('revision_reports').upsert({
         report_date:   date,
         bombero_id:    bomberoId,
@@ -366,7 +506,7 @@ export default function Revision() {
       reportDate: date,
       configs,
       actorEmail: email,
-      bvUnits: BV_UNITS,
+      bvUnits: bvUnits || DEFAULT_BV_UNITS,
       force: false,
     })
     if (!dailyRes?.ok) {
@@ -381,6 +521,7 @@ export default function Revision() {
       showToast('Informe diario de incidencias generado', 'ok')
     }
 
+    clearDraftSnapshot(date, bomberoId)
     setSaving(false)
     setView('calendar')
     setReviewState(null)
@@ -436,30 +577,27 @@ export default function Revision() {
           if (currentStatus === 'issue') {
             const cleanedNotes = { ...u.itemNotes }
             delete cleanedNotes[itemId]
+            const cleanedQty = { ...(u.qtyOverrides || {}) }
+            delete cleanedQty[itemId]
             return {
               ...u,
               itemChecks: { ...u.itemChecks, [itemId]: null },
               incidents: u.incidents.filter(inc => inc._itemId !== itemId),
               itemNotes: cleanedNotes,
+              qtyOverrides: cleanedQty,
             }
           }
-
-          const defaultNote = isMissing
-            ? 'Marcado por bombero: FALTA de material'
-            : 'Marcado por bombero: INCIDENCIA de material'
-          const note = u.itemNotes?.[itemId]?.trim() ? u.itemNotes[itemId] : defaultNote
-          const incidents = u.incidents.filter(inc => inc._itemId !== itemId)
-          incidents.push({ _itemId: itemId, zone: zoneName, item: itemName, note })
-
-          return {
-            ...u,
-            itemChecks: { ...u.itemChecks, [itemId]: 'issue' },
-            itemNotes: { ...u.itemNotes, [itemId]: note },
-            incidents,
-          }
+          return u
         })
         return { ...prev, units }
       })
+
+      if (activeUnit.itemChecks[itemId] !== 'issue') {
+        setIssueNoteType(isMissing ? 'missing' : 'incident')
+        setIssueNoteFiles([])
+        setIssueNoteDraft(activeUnit.itemNotes?.[itemId] || '')
+        setIssueNoteModal({ itemId, itemName, zoneName, editOnly: false })
+      }
     }
 
     function checkAll() {
@@ -482,13 +620,16 @@ export default function Revision() {
       })
     }
 
-    function saveIssueNote(itemId, zoneName, itemName, note) {
+    function saveIssueNote(itemId, zoneName, itemName) {
       const key = incidentKey(activeUnit.unitId, zoneName, itemName)
       if (activeUnit.itemChecks[itemId] !== 'issue' && existingIncidentKeys.has(key)) {
         showToast('Esa incidencia ya existe en Alertas', 'warn')
         setIssueNoteModal(null)
         return
       }
+      const note = issueNoteType === 'missing'
+        ? MISSING_NOTE
+        : (issueNoteDraft.trim() || INCIDENT_NOTE)
 
       // Set status to 'issue' and store the note
       setReviewState(prev => {
@@ -500,17 +641,24 @@ export default function Revision() {
           } else {
             newIncidents.push({ _itemId: itemId, itemId, zone: zoneName, item: itemName, note: '', source: 'revision' })
           }
+          const nextQtyOverrides = { ...(u.qtyOverrides || {}) }
+          if (issueNoteType === 'missing') nextQtyOverrides[itemId] = 0
+          else delete nextQtyOverrides[itemId]
           return {
             ...u,
             itemChecks: { ...u.itemChecks, [itemId]: 'issue' },
             itemNotes: { ...u.itemNotes, [itemId]: note },
             incidents: newIncidents,
+            qtyOverrides: nextQtyOverrides,
           }
         })
         return { ...prev, units }
       })
+      if (issueNoteType === 'incident' && issueNoteFiles.length > 0) addAttachmentFiles(issueNoteFiles)
       setIssueNoteModal(null)
       setIssueNoteDraft('')
+      setIssueNoteFiles([])
+      setIssueNoteType('incident')
     }
 
     function addIncident(incident) {
@@ -597,14 +745,23 @@ export default function Revision() {
                   <div style={{ fontSize: 12, color: 'var(--mid)' }}>Revisión del {dateLabel} · {units.length} unidad(es)</div>
                 </div>
               </div>
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={saveReview}
-                disabled={saving || !hasPermission('edit')}
-                style={{ background: 'var(--green)', borderColor: 'var(--green)' }}
-              >
-                {saving ? 'Guardando...' : '✔ Guardar revisión completa'}
-              </button>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => saveDraftSnapshot(reviewState, false)}
+                  disabled={!hasPermission('edit')}
+                >
+                  💾 Guardar progreso
+                </button>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={saveReview}
+                  disabled={saving || !hasPermission('edit')}
+                  style={{ background: 'var(--green)', borderColor: 'var(--green)' }}
+                >
+                  {saving ? 'Guardando...' : '✔ Guardar revisión completa'}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -731,17 +888,26 @@ export default function Revision() {
             })}
           </div>
 
-          <button
-            className="btn btn-primary btn-sm revision-save-btn"
-            onClick={saveReview}
-            disabled={saving || !hasPermission('edit')}
-            style={{
-              background: 'var(--green)', borderColor: 'var(--green)',
-              fontSize: 13, padding: '8px 20px', fontWeight: 700,
-            }}
-          >
-            {saving ? 'Guardando...' : '✔ Guardar revisión completa'}
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => saveDraftSnapshot(reviewState, false)}
+              disabled={!hasPermission('edit')}
+            >
+              💾 Guardar progreso
+            </button>
+            <button
+              className="btn btn-primary btn-sm revision-save-btn"
+              onClick={saveReview}
+              disabled={saving || !hasPermission('edit')}
+              style={{
+                background: 'var(--green)', borderColor: 'var(--green)',
+                fontSize: 13, padding: '8px 20px', fontWeight: 700,
+              }}
+            >
+              {saving ? 'Guardando...' : '✔ Guardar revisión completa'}
+            </button>
+          </div>
         </div>
 
         {/* Contenido principal */}
@@ -829,8 +995,11 @@ export default function Revision() {
                   {/* Artículos */}
                   {zItems.map(item => {
                     const status = activeUnit.itemChecks[item.id] // null | 'ok' | 'issue'
-                    const isMissing = item.qty === 0
-                    const isLow = item.qty > 0 && item.qty < item.min
+                    const displayQty = Object.prototype.hasOwnProperty.call(activeUnit.qtyOverrides || {}, item.id)
+                      ? Number(activeUnit.qtyOverrides[item.id])
+                      : Number(item.qty)
+                    const isMissing = displayQty === 0
+                    const isLow = displayQty > 0 && displayQty < item.min
                     const rowBg = status === 'ok' ? 'rgba(39,174,96,0.04)' : status === 'issue' ? 'rgba(192,57,43,0.06)' : 'transparent'
                     return (
                       <div key={item.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
@@ -901,7 +1070,13 @@ export default function Revision() {
                           <div style={{ flexShrink: 0, textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
                             {status === 'issue' && (
                               <span
-                                onClick={() => { setIssueNoteDraft(activeUnit.itemNotes?.[item.id] || ''); setIssueNoteModal({ itemId: item.id, itemName: item.name, zoneName: zone.label, editOnly: true }) }}
+                                onClick={() => {
+                                  const current = activeUnit.itemNotes?.[item.id] || ''
+                                  setIssueNoteType(String(current).trim() === MISSING_NOTE ? 'missing' : 'incident')
+                                  setIssueNoteFiles([])
+                                  setIssueNoteDraft(current)
+                                  setIssueNoteModal({ itemId: item.id, itemName: item.name, zoneName: zone.label, editOnly: true })
+                                }}
                                 style={{ fontSize: 9, fontWeight: 700, color: 'var(--red-l)', background: 'rgba(192,57,43,0.15)', border: '1px solid rgba(192,57,43,0.3)', padding: '1px 6px', borderRadius: 8, letterSpacing: 0.5, cursor: 'pointer' }}
                               >⚠ FALTA/INC.</span>
                             )}
@@ -909,7 +1084,7 @@ export default function Revision() {
                               fontFamily: 'Roboto Mono', fontSize: 13, fontWeight: 600,
                               color: isMissing ? 'var(--red-l)' : isLow ? 'var(--yellow-l)' : 'var(--green-l)',
                             }}>
-                              {item.qty}<span style={{ fontSize: 10, color: 'var(--mid)', fontWeight: 400 }}>/{item.min}</span>
+                              {displayQty}<span style={{ fontSize: 10, color: 'var(--mid)', fontWeight: 400 }}>/{item.min}</span>
                             </span>
                             {isMissing && <div style={{ fontSize: 9, color: 'var(--red-l)', fontWeight: 700, letterSpacing: 0.5 }}>FALTA</div>}
                             {isLow && !isMissing && <div style={{ fontSize: 9, color: 'var(--yellow-l)', fontWeight: 700, letterSpacing: 0.5 }}>BAJO</div>}
@@ -919,7 +1094,13 @@ export default function Revision() {
                         {/* Nota de incidencia inline */}
                         {status === 'issue' && activeUnit.itemNotes?.[item.id] && (
                           <div
-                            onClick={() => { setIssueNoteDraft(activeUnit.itemNotes[item.id]); setIssueNoteModal({ itemId: item.id, itemName: item.name, zoneName: zone.label, editOnly: true }) }}
+                            onClick={() => {
+                              const current = activeUnit.itemNotes[item.id]
+                              setIssueNoteType(String(current).trim() === MISSING_NOTE ? 'missing' : 'incident')
+                              setIssueNoteFiles([])
+                              setIssueNoteDraft(current)
+                              setIssueNoteModal({ itemId: item.id, itemName: item.name, zoneName: zone.label, editOnly: true })
+                            }}
                             style={{ margin: '0 16px 6px 78px', padding: '4px 10px', background: 'rgba(192,57,43,0.08)', border: '1px solid rgba(192,57,43,0.2)', borderRadius: 5, fontSize: 11, color: 'var(--red-l)', cursor: 'pointer', display: 'flex', gap: 6, alignItems: 'center' }}
                           >
                             <span style={{ opacity: 0.6 }}>📝</span>
@@ -1076,24 +1257,68 @@ export default function Revision() {
             </div>
             <div style={{ padding: '18px' }}>
               <div style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(192,57,43,0.06)', border: '1px solid rgba(192,57,43,0.15)', borderRadius: 8, fontSize: 12, color: 'var(--light)' }}>
-                Este artículo quedará marcado con ✕ y aparecerá automáticamente en el panel de incidencias.
+                Elige el tipo: <strong>No está</strong> o <strong>Presenta incidencia</strong>.
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{
+                    borderColor: issueNoteType === 'missing' ? 'var(--yellow)' : 'var(--border2)',
+                    color: issueNoteType === 'missing' ? 'var(--yellow-l)' : 'var(--mid)',
+                    background: issueNoteType === 'missing' ? 'rgba(241,196,15,0.12)' : 'transparent',
+                  }}
+                  onClick={() => setIssueNoteType('missing')}
+                >
+                  ✕ No está
+                </button>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{
+                    borderColor: issueNoteType === 'incident' ? 'var(--red)' : 'var(--border2)',
+                    color: issueNoteType === 'incident' ? 'var(--red-l)' : 'var(--mid)',
+                    background: issueNoteType === 'incident' ? 'rgba(192,57,43,0.12)' : 'transparent',
+                  }}
+                  onClick={() => setIssueNoteType('incident')}
+                >
+                  ⚠ Presenta incidencia
+                </button>
               </div>
               <label style={{ fontSize: 11, color: 'var(--mid)', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>¿Qué le sucede?</label>
               <textarea
                 autoFocus
                 className="form-input"
                 style={{ height: 90, resize: 'vertical', fontFamily: 'Barlow', fontSize: 13 }}
-                placeholder="Ej: Manguera rota, extintor caducado, falta la lanza..."
+                placeholder={issueNoteType === 'missing' ? 'Opcional: detalle de faltante...' : 'Ej: manguera rota, extintor caducado, pieza suelta...'}
                 value={issueNoteDraft}
                 onChange={e => setIssueNoteDraft(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) saveIssueNote(issueNoteModal.itemId, issueNoteModal.zoneName, issueNoteModal.itemName, issueNoteDraft) }}
+                onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) saveIssueNote(issueNoteModal.itemId, issueNoteModal.zoneName, issueNoteModal.itemName) }}
               />
+              {issueNoteType === 'incident' && (
+                <div style={{ marginTop: 10 }}>
+                  <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
+                    📷 Adjuntar foto
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      multiple
+                      style={{ display: 'none' }}
+                      onChange={e => setIssueNoteFiles(Array.from(e.target.files || []))}
+                    />
+                  </label>
+                  {issueNoteFiles.length > 0 && (
+                    <div style={{ marginTop: 6, fontSize: 11, color: 'var(--mid)' }}>
+                      {issueNoteFiles.length} foto(s) añadida(s) a esta incidencia
+                    </div>
+                  )}
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
                 <button className="btn btn-ghost btn-sm" onClick={() => setIssueNoteModal(null)}>Cancelar</button>
                 <button
                   className="btn btn-primary btn-sm"
                   style={{ background: 'var(--red)', borderColor: 'var(--red)' }}
-                  onClick={() => saveIssueNote(issueNoteModal.itemId, issueNoteModal.zoneName, issueNoteModal.itemName, issueNoteDraft)}
+                  onClick={() => saveIssueNote(issueNoteModal.itemId, issueNoteModal.zoneName, issueNoteModal.itemName)}
                 >
                   ⚠ Confirmar incidencia
                 </button>
@@ -1155,9 +1380,9 @@ export default function Revision() {
 
       {/* Leyenda BV */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
-        {Object.entries(BV_UNITS).map(([bvId]) => {
+        {Object.entries(bvUnits || DEFAULT_BV_UNITS).map(([bvId]) => {
           const c = BV_COLORS[parseInt(bvId)]
-          const activeUnits = getActiveUnitsForBv(Number(bvId), configs)
+          const activeUnits = getActiveUnitsForBv(Number(bvId), configs, bvUnits || DEFAULT_BV_UNITS)
           return (
             <div key={bvId} style={{
               display: 'flex', alignItems: 'center', gap: 6,
@@ -1259,9 +1484,9 @@ function TodayPanel({ date, reportIndex, configs, onStart, onHistory }) {
       </div>
 
       <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))' }}>
-        {Object.entries(BV_UNITS).map(([bvId]) => {
+        {Object.entries(bvUnits || DEFAULT_BV_UNITS).map(([bvId]) => {
           const bv = parseInt(bvId)
-          const activeUnits = getActiveUnitsForBv(bv, configs)
+          const activeUnits = getActiveUnitsForBv(bv, configs, bvUnits || DEFAULT_BV_UNITS)
           const key  = `${date}-${bv}`
           const reps = reportIndex[key] || []
           const effectiveReps = reps
@@ -1377,9 +1602,9 @@ function DayCell({ day, date, isToday, isFuture, isPast, isWeekend, reportIndex,
           : day}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {Object.entries(BV_UNITS).map(([bvId]) => {
+        {Object.entries(bvUnits || DEFAULT_BV_UNITS).map(([bvId]) => {
           const bv = parseInt(bvId)
-          const activeUnits = getActiveUnitsForBv(bv, configs)
+          const activeUnits = getActiveUnitsForBv(bv, configs, bvUnits || DEFAULT_BV_UNITS)
           const key  = `${date}-${bv}`
           const reps = reportIndex[key] || []
           const effectiveReps = reps

@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import Modal from '../components/Modal'
 import { buildAndStoreDailyIncidentReport } from '../lib/dailyIncidentReport'
 
-const BV_UNITS = {
+const DEFAULT_BV_UNITS = {
   1: [3, 7, 19],
   2: [0, 6, 14],
   3: [1, 16, 22],
@@ -19,7 +19,7 @@ function todayStr() {
 }
 
 export default function InformeDiarioIncidencias() {
-  const { isAdmin, configs, session, showToast } = useApp()
+  const { isAdmin, configs, session, showToast, bvUnits } = useApp()
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -58,7 +58,7 @@ export default function InformeDiarioIncidencias() {
       reportDate,
       configs,
       actorEmail: session?.user?.email || null,
-      bvUnits: BV_UNITS,
+      bvUnits: bvUnits || DEFAULT_BV_UNITS,
       force,
     })
     setRegenerating(false)
