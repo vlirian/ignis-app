@@ -20,6 +20,8 @@
   --blue-l: #3498DB;
 
   --sidebar-width: 220px;
+  --incident-floating-bottom: 20px;
+  --incident-floating-height: 112px;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -102,6 +104,63 @@ a { text-decoration: none; color: inherit; }
 .btn-danger:hover:not(:disabled) { background: var(--red-l); }
 
 .btn-sm { padding: 5px 11px; font-size: 12px; }
+
+@keyframes pendingSavePulse {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(151,71,255,0.45), 0 0 14px rgba(151,71,255,0.5);
+    transform: translateZ(0) scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(176,110,255,0.9), 0 0 30px rgba(176,110,255,0.95);
+    transform: translateZ(0) scale(1.03);
+  }
+}
+
+.btn-pending-save {
+  animation: pendingSavePulse 1s ease-in-out infinite;
+}
+
+.btn-inventory-update {
+  background: linear-gradient(180deg, #a855f7 0%, #8b5cf6 100%);
+  border: 1px solid rgba(209, 160, 255, 0.75);
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(166, 110, 255, 0.35), 0 0 14px rgba(151,71,255,0.5);
+}
+.btn-inventory-update:hover:not(:disabled) {
+  background: linear-gradient(180deg, #b46bff 0%, #9d63ff 100%);
+  border-color: rgba(222, 190, 255, 0.95);
+}
+
+.floating-inventory-save {
+  position: fixed;
+  right: 20px;
+  top: 86px;
+  width: 260px;
+  z-index: 560;
+}
+
+.incident-banner-anchor {
+  position: fixed;
+  right: 20px;
+  bottom: var(--incident-floating-bottom);
+  z-index: 500;
+}
+
+@media (max-width: 768px) {
+  :root {
+    --incident-floating-bottom: 10px;
+    --incident-floating-height: 116px;
+  }
+  .floating-inventory-save {
+    right: 12px;
+    top: 78px;
+    width: 220px;
+  }
+  .incident-banner-anchor {
+    right: 12px;
+  }
+}
+
 .btn-icon {
   width: 30px;
   height: 30px;

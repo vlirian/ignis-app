@@ -1,10 +1,15 @@
 import { useMemo, useState } from 'react'
 import { useApp } from '../lib/AppContext'
-import { UNIT_IDS, buildZones } from '../data/units'
+import { buildZones } from '../data/units'
 import { useNavigate } from 'react-router-dom'
 
 export default function Alertas() {
   const { configs, items, revisionIncidents } = useApp()
+  const activeUnitIds = Object.keys(configs || {})
+    .map(Number)
+    .filter(Number.isFinite)
+    .filter(id => configs[id]?.isActive !== false)
+    .sort((a, b) => a - b)
   const navigate = useNavigate()
   const [sortMode, setSortMode] = useState('fecha_desc')
   const [photoViewer, setPhotoViewer] = useState(null) // { urls: string[], index: number, title?: string }
@@ -20,11 +25,12 @@ export default function Alertas() {
 
   // ── Alertas de stock ─────────────────────────────────
   const stockAlerts = []
-  UNIT_IDS.forEach(unitId => {
+  activeUnitIds.forEach(unitId => {
     const cfg   = configs[unitId]
+    if (!cfg) return
     const zones = buildZones(cfg.numCofres, cfg.hasTecho, cfg.hasTrasera)
     zones.forEach(zone => {
-      const zItems = items[unitId][zone.id] || []
+      const zItems = items[unitId]?.[zone.id] || []
       zItems.forEach(item => {
         if (item.qty < item.min) {
           stockAlerts.push({
@@ -38,7 +44,9 @@ export default function Alertas() {
   })
 
   // ── Incidencias generales (única fuente: revisiones diarias) ─────────
-  const reviewIssueAlerts = (revisionIncidents || []).map(inc => ({
+  const reviewIssueAlerts = (revisionIncidents || [])
+    .filter(inc => configs[Number(inc.unitId)]?.isActive !== false)
+    .map(inc => ({
     unitId: inc.unitId,
     zone: inc.zone,
     zoneId: inc.zoneId || '',
@@ -117,7 +125,7 @@ export default function Alertas() {
           <div style={{ fontSize: 10, color: 'var(--mid)', letterSpacing: 1.5, textTransform: 'uppercase' }}>Incidencias de revisión</div>
         </div>
         <div className="card" style={{ padding: '14px 22px', borderTop: '3px solid var(--green)' }}>
-          <div style={{ fontFamily: 'Barlow Condensed', fontSize: 36, fontWeight: 900, color: 'var(--green-l)' }}>{UNIT_IDS.length - new Set([...stockAlerts, ...issueAlerts].map(a => a.unitId)).size}</div>
+          <div style={{ fontFamily: 'Barlow Condensed', fontSize: 36, fontWeight: 900, color: 'var(--green-l)' }}>{activeUnitIds.length - new Set([...stockAlerts, ...issueAlerts].map(a => a.unitId)).size}</div>
           <div style={{ fontSize: 10, color: 'var(--mid)', letterSpacing: 1.5, textTransform: 'uppercase' }}>Unidades sin alertas</div>
         </div>
       </div>

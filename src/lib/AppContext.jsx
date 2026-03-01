@@ -60,11 +60,15 @@ function unitToBv(unitId) {
   return 1
 }
 
+function unitLabel(unitId) {
+  return `U${String(unitId).padStart(2, '0')}`
+}
+
 function emptyState() {
   const configs = {}
   const items = {}
   UNIT_IDS.forEach(id => {
-    configs[id] = defaultUnitConfig(id)
+    configs[id] = { ...defaultUnitConfig(id), isActive: true }
     items[id] = {}
     buildZones(configs[id].numCofres, configs[id].hasTecho, configs[id].hasTrasera)
       .forEach(z => { items[id][z.id] = [] })
@@ -88,6 +92,17 @@ async function fetchAllRows(table, buildQuery, pageSize = 1000) {
   }
 
   return rows
+}
+
+function uniqueSortedUnitIds(...sources) {
+  const set = new Set()
+  sources.forEach((src) => {
+    ;(src || []).forEach((raw) => {
+      const n = Number(raw)
+      if (Number.isFinite(n) && n >= 0) set.add(n)
+    })
+  })
+  return Array.from(set).sort((a, b) => a - b)
 }
 
 export function AppProvider({ children }) {
@@ -199,18 +214,28 @@ export function AppProvider({ children }) {
       const { data: cfgData, error: cfgErr } = await supabase.from('unit_configs').select('*')
       if (cfgErr) throw cfgErr
 
-      const configs = {}
-      UNIT_IDS.forEach(id => { configs[id] = defaultUnitConfig(id) })
-      cfgData.forEach(row => {
-        configs[row.unit_id] = { numCofres: row.num_cofres, hasTecho: row.has_techo, hasTrasera: row.has_trasera }
-      })
-
       const itemData = await fetchAllRows('unit_items', (q) =>
         q.select('*').order('created_at', { ascending: true })
       )
 
+      const allUnitIds = uniqueSortedUnitIds(
+        UNIT_IDS,
+        (cfgData || []).map(r => r.unit_id),
+        (itemData || []).map(r => r.unit_id),
+      )
+      const configs = {}
+      allUnitIds.forEach(id => { configs[id] = { ...defaultUnitConfig(id), isActive: true } })
+      cfgData.forEach(row => {
+        configs[row.unit_id] = {
+          numCofres: row.num_cofres,
+          hasTecho: row.has_techo,
+          hasTrasera: row.has_trasera,
+          isActive: row.is_active !== false,
+        }
+      })
+
       const items = {}
-      UNIT_IDS.forEach(id => {
+      allUnitIds.forEach(id => {
         items[id] = {}
         buildZones(configs[id].numCofres, configs[id].hasTecho, configs[id].hasTrasera)
           .forEach(z => { items[id][z.id] = [] })
@@ -311,6 +336,37 @@ export function AppProvider({ children }) {
     return perms.includes(permission)
   }, [isAdmin, effectiveRole])
 
+  const logInventoryChange = useCallback(async ({
+    unitId,
+    zoneId = null,
+    itemId = null,
+    itemName = '',
+    changeType,
+    detail = '',
+    previousValue = null,
+    newValue = null,
+    metadata = null,
+  }) => {
+    try {
+      const actor = session?.user?.email || null
+      await supabase.from('inventory_change_log').insert({
+        unit_id: unitId,
+        unit_label: unitLabel(unitId),
+        zone_id: zoneId,
+        item_id: itemId ? String(itemId) : null,
+        item_name: itemName || null,
+        change_type: changeType,
+        detail: detail || null,
+        previous_value: previousValue,
+        new_value: newValue,
+        changed_by: actor,
+        metadata: metadata || null,
+      })
+    } catch (e) {
+      console.warn('No se pudo registrar inventory_change_log:', e?.message || e)
+    }
+  }, [session?.user?.email])
+
   // ── Revisión de unidad ────────────────────────────────
   const refreshRevisionIncidents = useCallback(async () => {
     const data = await fetchAllRows('revision_reports', (q) =>
@@ -408,14 +464,14 @@ export function AppProvider({ children }) {
           is_ok: false,
           incidents: merged,
           general_notes: '',
-          reviewed_by: 'unidades',
+          reviewed_by: session?.user?.email || 'unidades',
         })
       if (insErr) return { ok: false, error: insErr.message || 'insert_error' }
     }
 
     await refreshRevisionIncidents()
     return { ok: true }
-  }, [todayDate, refreshRevisionIncidents])
+  }, [todayDate, refreshRevisionIncidents, session?.user?.email])
 
   const clearIncidentFromReports = useCallback(async ({ unitId, itemId, zoneLabel, itemName }) => {
     const keyMatch = (inc) => {
@@ -449,6 +505,10 @@ export function AppProvider({ children }) {
 
   // ── Item states (revisión por artículo) ───────────────
   const setUnitItemState = useCallback(async (unitId, itemId, state) => {
+    if (!hasPermission('edit')) {
+      showToast('Solo lectura: no puedes modificar inventario', 'warn')
+      return
+    }
     const localPrevStatus = itemStates?.[unitId]?.[itemId]?.status || null
     const meta = resolveItemMeta(unitId, itemId)
     const inRevisionIncidents = (() => {
@@ -480,6 +540,16 @@ export function AppProvider({ children }) {
         source: 'unidad',
       })
       if (!sync?.ok) showToast(`No se pudo sincronizar: ${sync.error || 'error'}`, 'error')
+      await logInventoryChange({
+        unitId,
+        zoneId: meta.zoneId,
+        itemId,
+        itemName: meta.itemName,
+        changeType: 'item_state_issue',
+        detail: state?.note ? `Incidencia: ${state.note}` : 'Incidencia marcada',
+        previousValue: { status: prevStatus || null },
+        newValue: { status: 'issue' },
+      })
       return
     }
 
@@ -491,8 +561,32 @@ export function AppProvider({ children }) {
         itemName: meta.itemName,
       })
       if (!clear?.ok) showToast(`No se pudo quitar sincronizada: ${clear.error || 'error'}`, 'error')
+      await logInventoryChange({
+        unitId,
+        zoneId: meta.zoneId,
+        itemId,
+        itemName: meta.itemName,
+        changeType: 'item_state_resolved',
+        detail: 'Incidencia resuelta',
+        previousValue: { status: prevStatus || null },
+        newValue: { status: state?.status || null },
+      })
+      return
     }
-  }, [itemStates, revisionIncidents, resolveItemMeta, syncIncidentToReports, clearIncidentFromReports, showToast])
+
+    if (prevStatus !== (state?.status || null)) {
+      await logInventoryChange({
+        unitId,
+        zoneId: meta.zoneId,
+        itemId,
+        itemName: meta.itemName,
+        changeType: 'item_state',
+        detail: `Estado artículo: ${state?.status || 'sin marcar'}`,
+        previousValue: { status: prevStatus || null },
+        newValue: { status: state?.status || null },
+      })
+    }
+  }, [itemStates, revisionIncidents, resolveItemMeta, syncIncidentToReports, clearIncidentFromReports, showToast, logInventoryChange, hasPermission])
 
   const setUnitAllItemStates = useCallback((unitId, states) => {
     setItemStates(prev => ({
@@ -513,6 +607,10 @@ export function AppProvider({ children }) {
   }, [isAdmin, refreshRevisionIncidents])
 
   const reviewUnit = useCallback(async (unitId, notes = '', isOk = true) => {
+    if (!hasPermission('edit')) {
+      showToast('Solo lectura: no puedes registrar revisiones', 'warn')
+      return null
+    }
     const userEmail = session?.user?.email || 'desconocido'
     const { data, error } = await supabase
       .from('unit_reviews')
@@ -522,23 +620,50 @@ export function AppProvider({ children }) {
     setReviews(prev => ({ ...prev, [unitId]: data }))
     showToast('✔ Revisión registrada', 'ok')
     return data
-  }, [session, showToast])
+  }, [session, showToast, hasPermission])
 
   // ── CRUD artículos ────────────────────────────────────
   const updateQty = useCallback(async (unitId, zoneId, itemId, delta) => {
+    if (!hasPermission('edit')) {
+      showToast('Solo lectura: no puedes modificar cantidades', 'warn')
+      return
+    }
     let newQty
+    let itemName = ''
+    let oldQty = null
     setState(prev => {
       const zoneItems = (prev.items[unitId][zoneId] || []).map(it => {
-        if (it.id === itemId) { newQty = Math.max(0, it.qty + delta); return { ...it, qty: newQty } }
+        if (it.id === itemId) {
+          oldQty = it.qty
+          itemName = it.name
+          newQty = Math.max(0, it.qty + delta)
+          return { ...it, qty: newQty }
+        }
         return it
       })
       return { ...prev, items: { ...prev.items, [unitId]: { ...prev.items[unitId], [zoneId]: zoneItems } } }
     })
     const { error } = await supabase.from('unit_items').update({ qty: newQty }).eq('id', itemId)
     if (error) showToast('Error al guardar', 'error')
-  }, [showToast])
+    if (!error) {
+      await logInventoryChange({
+        unitId,
+        zoneId,
+        itemId,
+        itemName,
+        changeType: 'qty_update',
+        detail: `Cantidad ${delta > 0 ? 'aumentada' : 'reducida'} (${oldQty} -> ${newQty})`,
+        previousValue: { qty: oldQty },
+        newValue: { qty: newQty },
+      })
+    }
+  }, [showToast, logInventoryChange, hasPermission])
 
   const addItem = useCallback(async (unitId, zoneId, item) => {
+    if (!hasPermission('edit')) {
+      showToast('Solo lectura: no puedes añadir artículos', 'warn')
+      return null
+    }
     const { data, error } = await supabase
       .from('unit_items')
       .insert({ unit_id: unitId, zone_id: zoneId, name: item.name, description: item.desc || '', qty: item.qty, min_qty: item.min })
@@ -549,19 +674,49 @@ export function AppProvider({ children }) {
       ...prev,
       items: { ...prev.items, [unitId]: { ...prev.items[unitId], [zoneId]: [...(prev.items[unitId][zoneId] || []), newItem] } }
     }))
+    await logInventoryChange({
+      unitId,
+      zoneId,
+      itemId: newItem.id,
+      itemName: newItem.name,
+      changeType: 'item_add',
+      detail: `Artículo añadido en ${zoneId}`,
+      previousValue: null,
+      newValue: { name: newItem.name, desc: newItem.desc, qty: newItem.qty, min: newItem.min },
+    })
     return newItem
-  }, [showToast])
+  }, [showToast, logInventoryChange, hasPermission])
 
   const deleteItem = useCallback(async (unitId, zoneId, itemId) => {
+    if (!hasPermission('edit')) {
+      showToast('Solo lectura: no puedes eliminar artículos', 'warn')
+      return
+    }
+    const prevItem = (state.items?.[unitId]?.[zoneId] || []).find(it => it.id === itemId) || null
     const { error } = await supabase.from('unit_items').delete().eq('id', itemId)
     if (error) { showToast('Error al eliminar', 'error'); return }
     setState(prev => ({
       ...prev,
       items: { ...prev.items, [unitId]: { ...prev.items[unitId], [zoneId]: prev.items[unitId][zoneId].filter(it => it.id !== itemId) } }
     }))
-  }, [showToast])
+    await logInventoryChange({
+      unitId,
+      zoneId,
+      itemId,
+      itemName: prevItem?.name || '',
+      changeType: 'item_delete',
+      detail: `Artículo eliminado de ${zoneId}`,
+      previousValue: prevItem ? { name: prevItem.name, desc: prevItem.desc, qty: prevItem.qty, min: prevItem.min } : null,
+      newValue: null,
+    })
+  }, [showToast, state.items, logInventoryChange, hasPermission])
 
   const editItem = useCallback(async (unitId, zoneId, itemId, changes) => {
+    if (!hasPermission('edit')) {
+      showToast('Solo lectura: no puedes editar artículos', 'warn')
+      return
+    }
+    const prevItem = (state.items?.[unitId]?.[zoneId] || []).find(it => it.id === itemId) || null
     const { error } = await supabase
       .from('unit_items')
       .update({ name: changes.name, description: changes.desc, qty: changes.qty, min_qty: changes.min })
@@ -571,9 +726,24 @@ export function AppProvider({ children }) {
       ...prev,
       items: { ...prev.items, [unitId]: { ...prev.items[unitId], [zoneId]: prev.items[unitId][zoneId].map(it => it.id === itemId ? { ...it, ...changes } : it) } }
     }))
-  }, [showToast])
+    await logInventoryChange({
+      unitId,
+      zoneId,
+      itemId,
+      itemName: changes?.name || prevItem?.name || '',
+      changeType: 'item_edit',
+      detail: `Artículo editado en ${zoneId}`,
+      previousValue: prevItem ? { name: prevItem.name, desc: prevItem.desc, qty: prevItem.qty, min: prevItem.min } : null,
+      newValue: { name: changes.name, desc: changes.desc, qty: changes.qty, min: changes.min },
+    })
+  }, [showToast, state.items, logInventoryChange, hasPermission])
 
   const updateUnitConfig = useCallback(async (unitId, newConfig) => {
+    if (!hasPermission('edit')) {
+      showToast('Solo lectura: no puedes cambiar configuración de unidad', 'warn')
+      return
+    }
+    const oldConfig = state.configs?.[unitId] || null
     const { error } = await supabase.from('unit_configs').upsert({
       unit_id: unitId, num_cofres: newConfig.numCofres, has_techo: newConfig.hasTecho, has_trasera: newConfig.hasTrasera,
     })
@@ -584,7 +754,98 @@ export function AppProvider({ children }) {
       zones.forEach(z => { if (!updatedItems[z.id]) updatedItems[z.id] = [] })
       return { ...prev, configs: { ...prev.configs, [unitId]: newConfig }, items: { ...prev.items, [unitId]: updatedItems } }
     })
-  }, [showToast])
+    await logInventoryChange({
+      unitId,
+      zoneId: null,
+      itemId: null,
+      itemName: '',
+      changeType: 'unit_config_update',
+      detail: 'Configuración de unidad actualizada',
+      previousValue: oldConfig,
+      newValue: { ...newConfig, isActive: oldConfig?.isActive !== false },
+    })
+  }, [showToast, state.configs, logInventoryChange, hasPermission])
+
+  const createUnit = useCallback(async (unitId, cfgOverride = null) => {
+    if (!isAdmin) return { ok: false, error: 'not_admin' }
+    const id = Number(unitId)
+    if (!Number.isFinite(id) || id < 0) return { ok: false, error: 'invalid_unit_id' }
+    if (state.configs?.[id]) return { ok: false, error: 'already_exists' }
+
+    const cfg = cfgOverride || defaultUnitConfig(id)
+    const payload = {
+      unit_id: id,
+      num_cofres: Number(cfg.numCofres) || 4,
+      has_techo: !!cfg.hasTecho,
+      has_trasera: !!cfg.hasTrasera,
+      is_active: true,
+    }
+    const { error } = await supabase.from('unit_configs').upsert(payload)
+    if (error) return { ok: false, error: error.message || 'db_error' }
+
+    setState(prev => {
+      const zones = buildZones(payload.num_cofres, payload.has_techo, payload.has_trasera)
+      const nextItems = {}
+      zones.forEach(z => { nextItems[z.id] = [] })
+      return {
+        ...prev,
+        configs: { ...prev.configs, [id]: { numCofres: payload.num_cofres, hasTecho: payload.has_techo, hasTrasera: payload.has_trasera, isActive: true } },
+        items: { ...prev.items, [id]: nextItems },
+      }
+    })
+
+    await logInventoryChange({
+      unitId: id,
+      changeType: 'unit_create',
+      detail: 'Unidad creada por administrador',
+      previousValue: null,
+      newValue: { numCofres: payload.num_cofres, hasTecho: payload.has_techo, hasTrasera: payload.has_trasera, isActive: true },
+    })
+
+    return { ok: true, unitId: id }
+  }, [isAdmin, state.configs, logInventoryChange])
+
+  const setUnitActive = useCallback(async (unitId, active) => {
+    if (!isAdmin) return { ok: false, error: 'not_admin' }
+    const id = Number(unitId)
+    if (!Number.isFinite(id) || id < 0) return { ok: false, error: 'invalid_unit_id' }
+
+    const prevCfg = state.configs?.[id] || null
+    const payload = {
+      unit_id: id,
+      num_cofres: Number(prevCfg?.numCofres) || Number(defaultUnitConfig(id).numCofres) || 4,
+      has_techo: prevCfg?.hasTecho ?? true,
+      has_trasera: prevCfg?.hasTrasera ?? true,
+      is_active: !!active,
+    }
+    const { error } = await supabase.from('unit_configs').upsert(payload)
+    if (error) return { ok: false, error: error.message || 'db_error' }
+
+    setState(prev => ({
+      ...prev,
+      configs: {
+        ...prev.configs,
+        [id]: {
+          ...(prev.configs?.[id] || defaultUnitConfig(id)),
+          isActive: !!active,
+        },
+      },
+    }))
+
+    await logInventoryChange({
+      unitId: id,
+      changeType: 'unit_activation',
+      detail: active ? 'Unidad reactivada' : 'Unidad desactivada',
+      previousValue: { isActive: prevCfg?.isActive !== false },
+      newValue: { isActive: !!active },
+    })
+
+    return { ok: true }
+  }, [isAdmin, state.configs, logInventoryChange])
+
+  const refreshInventory = useCallback(async () => {
+    await loadAll(true)
+  }, [])
 
   return (
     <AppContext.Provider value={{
@@ -594,7 +855,7 @@ export function AppProvider({ children }) {
       loading, toast, showToast,
       itemStates, setUnitItemState, setUnitAllItemStates,
       revisionIncidents, refreshRevisionIncidents, clearAllIncidents,
-      reviewUnit, updateQty, addItem, deleteItem, editItem, updateUnitConfig,
+      reviewUnit, updateQty, addItem, deleteItem, editItem, updateUnitConfig, createUnit, setUnitActive, refreshInventory,
     }}>
       {children}
     </AppContext.Provider>

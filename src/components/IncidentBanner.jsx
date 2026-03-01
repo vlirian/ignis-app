@@ -30,9 +30,8 @@ export default function IncidentBanner() {
   const pulse = uniqueIncidents.length > 0
 
   return (
-    <div style={{
-      position: 'fixed', bottom: 20, right: 20, zIndex: 500,
-      maxWidth: expanded ? 420 : 'auto',
+    <div className="incident-banner-anchor" style={{
+      maxWidth: expanded ? 420 : 'none',
       filter: 'drop-shadow(0 8px 32px rgba(192,57,43,0.4))',
       animation: pulse ? 'incidentPulse 2.5s ease-in-out infinite' : 'none',
     }}>

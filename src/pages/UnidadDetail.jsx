@@ -1,8 +1,43 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { createPortal } from 'react-dom'
 import { useApp } from '../lib/AppContext'
 import { buildZones, zoneStatus, unitSummary, unitAlertLevel } from '../data/units'
 import Modal from '../components/Modal'
+
+function cloneUnitItems(unitItems = {}) {
+  const next = {}
+  Object.entries(unitItems || {}).forEach(([zoneId, arr]) => {
+    next[zoneId] = (arr || []).map(it => ({ ...it }))
+  })
+  return next
+}
+
+function makeTempItemId() {
+  return `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function isPersistedItemId(rawId) {
+  const txt = String(rawId || '')
+  return txt !== '' && !txt.startsWith('tmp-') && /^[0-9]+$/.test(txt)
+}
+
+function normalizeItemsForCompare(unitItems = {}) {
+  const zones = Object.keys(unitItems || {}).sort()
+  const out = {}
+  zones.forEach((zoneId) => {
+    out[zoneId] = (unitItems[zoneId] || [])
+      .map((it) => ({
+        id: String(it.id),
+        name: String(it.name || ''),
+        desc: String(it.desc || ''),
+        qty: Number(it.qty) || 0,
+        min: Number(it.min) || 0,
+      }))
+      .sort((a, b) => (a.id > b.id ? 1 : a.id < b.id ? -1 : 0))
+  })
+  return out
+}
 
 export default function UnidadDetail() {
   const { id } = useParams()
@@ -10,9 +45,9 @@ export default function UnidadDetail() {
   const navigate = useNavigate()
   const location = useLocation()
   const {
-    configs, items, reviews, reviewUnit, updateQty, addItem, deleteItem, updateUnitConfig,
+    configs, items, reviews, reviewUnit, updateQty, addItem, deleteItem, editItem, updateUnitConfig,
     showToast, session, itemStates: globalItemStates, revisionIncidents,
-    setUnitItemState
+    setUnitItemState, refreshInventory
   } = useApp()
 
   const [selectedZone, setSelectedZone] = useState(null)
@@ -24,25 +59,61 @@ export default function UnidadDetail() {
   const [reviewLoading, setReviewLoading] = useState(false)
   const [issueModal, setIssueModal] = useState(null)  // { itemId, itemName, note }
   const [issueDraft, setIssueDraft] = useState('')
+  const [issueSaving, setIssueSaving] = useState(false)
   const [draftItemStates, setDraftItemStates] = useState({})
   const [hasLocalIncidenceEdits, setHasLocalIncidenceEdits] = useState(false)
   const [savingIncidences, setSavingIncidences] = useState(false)
   const [focusedItemId, setFocusedItemId] = useState(null)
   const [newItem, setNewItem] = useState({ name: '', desc: '', qty: 1, min: 1 })
   const [cfgForm, setCfgForm] = useState(null)
+  const [draftItems, setDraftItems] = useState({})
+  const [draftConfig, setDraftConfig] = useState(null)
+  const [hasPendingInventoryChanges, setHasPendingInventoryChanges] = useState(false)
+  const [savingInventory, setSavingInventory] = useState(false)
+  const [deletedItemIds, setDeletedItemIds] = useState([])
+
+  const goToDailyRevision = () => {
+    guardedNavigate('/revision', {
+      state: {
+        fromUnitId: unitId,
+        openUnitReview: true,
+        reviewNonce: Date.now(),
+      },
+    })
+  }
 
   if (!configs[unitId]) {
     return <div style={{ padding: 40, color: 'var(--mid)' }}>Unidad no encontrada.</div>
   }
 
-  const cfg = configs[unitId]
+  const persistedCfg = configs[unitId]
+  const cfg = draftConfig || persistedCfg
   const zones = buildZones(cfg.numCofres, cfg.hasTecho, cfg.hasTrasera)
-  const extraZones = Object.keys(items[unitId] || {})
+  const workingItems =
+    hasPendingInventoryChanges || Object.keys(draftItems || {}).length > 0
+      ? draftItems
+      : (items[unitId] || {})
+  const extraZones = Object.keys(workingItems || {})
     .filter(zoneId => !zones.some(z => z.id === zoneId))
     .map(zoneId => ({ id: zoneId, label: `Zona SQL: ${zoneId}`, icon: '🧩', extra: true }))
   const allZones = [...zones, ...extraZones]
-  const summary = unitSummary(items[unitId], zones)
-  const level = unitAlertLevel(items[unitId], zones)
+  const summary = unitSummary(workingItems, zones)
+  const level = unitAlertLevel(workingItems, zones)
+  const inventoryDirty = useMemo(() => {
+    const cfgBase = persistedCfg || {}
+    const cfgDraft = draftConfig || persistedCfg || {}
+    const cfgChanged =
+      Number(cfgBase.numCofres) !== Number(cfgDraft.numCofres) ||
+      Boolean(cfgBase.hasTecho) !== Boolean(cfgDraft.hasTecho) ||
+      Boolean(cfgBase.hasTrasera) !== Boolean(cfgDraft.hasTrasera)
+
+    const deletedChanged = (deletedItemIds || []).length > 0
+    const baseNorm = normalizeItemsForCompare(items[unitId] || {})
+    const draftNorm = normalizeItemsForCompare(draftItems || {})
+    const itemsChanged = JSON.stringify(baseNorm) !== JSON.stringify(draftNorm)
+
+    return cfgChanged || deletedChanged || itemsChanged || hasPendingInventoryChanges
+  }, [persistedCfg, draftConfig, deletedItemIds, items, unitId, draftItems, hasPendingInventoryChanges])
   // itemStates for this unit from global context + incidencias creadas en revisión diaria
   const itemStates = useMemo(() => {
     const local = globalItemStates[unitId] || {}
@@ -58,12 +129,19 @@ export default function UnidadDetail() {
       }
       const zoneByLabel = zones.find(z => String(z.label).trim().toLowerCase() === String(inc.zone || '').trim().toLowerCase())
       if (!zoneByLabel) return
-      const matched = (items[unitId]?.[zoneByLabel.id] || []).find(it => String(it.name).trim().toLowerCase() === String(inc.item || '').trim().toLowerCase())
+      const matched = (workingItems?.[zoneByLabel.id] || []).find(it => String(it.name).trim().toLowerCase() === String(inc.item || '').trim().toLowerCase())
       if (!matched) return
       fromRevision[matched.id] = { status: 'issue', note: inc.note || '' }
     })
     return { ...localWithoutIssues, ...fromRevision }
-  }, [globalItemStates, revisionIncidents, unitId, zones, items])
+  }, [globalItemStates, revisionIncidents, unitId, zones, workingItems])
+
+  useEffect(() => {
+    if (hasPendingInventoryChanges) return
+    setDraftConfig({ ...persistedCfg })
+    setDraftItems(cloneUnitItems(items[unitId] || {}))
+    setDeletedItemIds([])
+  }, [persistedCfg, items, unitId, hasPendingInventoryChanges])
 
   useEffect(() => {
     if (!hasLocalIncidenceEdits) {
@@ -78,17 +156,122 @@ export default function UnidadDetail() {
 
   const handleAddItem = () => {
     if (!newItem.name.trim()) { showToast('Escribe un nombre', 'warn'); return }
-    addItem(unitId, addModal, { ...newItem })
+    if (!addModal) return
+    const toAdd = {
+      id: makeTempItemId(),
+      name: newItem.name.trim(),
+      desc: newItem.desc || '',
+      qty: Math.max(0, Number(newItem.qty) || 0),
+      min: Math.max(0, Number(newItem.min) || 0),
+    }
+    setDraftItems(prev => ({
+      ...prev,
+      [addModal]: [...(prev?.[addModal] || []), toAdd],
+    }))
+    setHasPendingInventoryChanges(true)
     showToast(`Añadido: ${newItem.name}`, 'ok')
     setNewItem({ name: '', desc: '', qty: 1, min: 1 })
     setAddModal(null)
   }
 
   const handleCfgSave = () => {
-    updateUnitConfig(unitId, cfgForm)
+    setDraftConfig({ ...cfgForm })
+    setHasPendingInventoryChanges(true)
     showToast('Configuración actualizada', 'ok')
     setCfgModal(false)
     setSelectedZone(null)
+  }
+
+  const saveInventoryDraft = async () => {
+    if (savingInventory) return
+    const baseItems = items[unitId] || {}
+    const draft = draftItems || {}
+    const currentCfg = persistedCfg
+    const nextCfg = draftConfig || persistedCfg
+    const deletedIds = new Set((deletedItemIds || []).map(String))
+    const nextDraft = cloneUnitItems(draft)
+    setSavingInventory(true)
+    try {
+      if (
+        currentCfg.numCofres !== nextCfg.numCofres ||
+        currentCfg.hasTecho !== nextCfg.hasTecho ||
+        currentCfg.hasTrasera !== nextCfg.hasTrasera
+      ) {
+        await updateUnitConfig(unitId, nextCfg)
+      }
+
+      const zoneIds = Array.from(new Set([
+        ...Object.keys(baseItems || {}),
+        ...Object.keys(draft || {}),
+      ]))
+
+      for (const zoneId of zoneIds) {
+        const baseZone = baseItems[zoneId] || []
+        const draftZone = draft[zoneId] || []
+        const baseMap = new Map(baseZone.map(it => [String(it.id), it]))
+        const nextZone = nextDraft[zoneId] || []
+
+        for (const baseItem of baseZone) {
+          if (!deletedIds.has(String(baseItem.id))) continue
+          await deleteItem(unitId, zoneId, baseItem.id)
+        }
+
+        for (const draftItem of draftZone) {
+          const idTxt = String(draftItem.id)
+          const isTemp = idTxt.startsWith('tmp-')
+          if (isTemp) {
+            const created = await addItem(unitId, zoneId, {
+              name: draftItem.name,
+              desc: draftItem.desc || '',
+              qty: Number(draftItem.qty) || 0,
+              min: Number(draftItem.min) || 0,
+            })
+            if (created?.id) {
+              const idx = nextZone.findIndex(it => String(it.id) === idTxt)
+              if (idx >= 0) {
+                nextZone[idx] = { ...created }
+                nextDraft[zoneId] = [...nextZone]
+              }
+            }
+            continue
+          }
+
+          if (deletedIds.has(idTxt)) continue
+          const baseItem = baseMap.get(idTxt)
+          if (!baseItem) continue
+          if (
+            String(baseItem.name) !== String(draftItem.name) ||
+            String(baseItem.desc || '') !== String(draftItem.desc || '') ||
+            Number(baseItem.min) !== Number(draftItem.min)
+          ) {
+            await editItem(unitId, zoneId, baseItem.id, {
+              name: draftItem.name,
+              desc: draftItem.desc || '',
+              qty: Number(draftItem.qty) || 0,
+              min: Number(draftItem.min) || 0,
+            })
+          } else if (Number(baseItem.qty) !== Number(draftItem.qty)) {
+            await updateQty(unitId, zoneId, baseItem.id, Number(draftItem.qty) - Number(baseItem.qty))
+          }
+        }
+      }
+
+      await refreshInventory()
+      setDraftItems(nextDraft)
+      setDeletedItemIds([])
+      setHasPendingInventoryChanges(false)
+      showToast('Inventario actualizado', 'ok')
+    } finally {
+      setSavingInventory(false)
+    }
+  }
+
+  const resetInventoryDraft = () => {
+    setDraftConfig({ ...persistedCfg })
+    setDraftItems(cloneUnitItems(items[unitId] || {}))
+    setDeletedItemIds([])
+    setHasPendingInventoryChanges(false)
+    showToast('Cambios de inventario descartados', 'warn')
   }
 
   const handleReviewSubmit = async () => {
@@ -102,21 +285,22 @@ export default function UnidadDetail() {
 
   const handleIssueSave = async () => {
     if (!issueModal) return
-    setDraftItemStates(prev => ({
-      ...prev,
-      [issueModal.itemId]: { status: 'issue', note: issueDraft },
-    }))
-    setHasLocalIncidenceEdits(true)
+    setIssueSaving(true)
+    const next = { status: 'issue', note: issueDraft || '' }
+    setDraftItemStates(prev => ({ ...prev, [issueModal.itemId]: next }))
+    await setUnitItemState(unitId, issueModal.itemId, next)
+    setIssueSaving(false)
+    showToast('Incidencia guardada', 'ok')
     setIssueModal(null)
     setIssueDraft('')
   }
 
-  const guardedNavigate = (to) => {
-    if (hasLocalIncidenceEdits) {
-      const ok = window.confirm('Tienes cambios de incidencias sin guardar. ¿Seguro que quieres salir?')
+  const guardedNavigate = (to, options = undefined) => {
+    if (hasLocalIncidenceEdits || inventoryDirty) {
+      const ok = window.confirm('Tienes cambios sin guardar. Pulsa "Actualizar inventario" y/o guarda incidencias antes de salir. ¿Seguro que quieres continuar?')
       if (!ok) return
     }
-    navigate(to)
+    navigate(to, options)
   }
 
   const saveIncidenceDraft = async () => {
@@ -159,17 +343,37 @@ export default function UnidadDetail() {
     setSelectedZone(null)
     setFocusedItemId(null)
     setHasLocalIncidenceEdits(false)
+    setHasPendingInventoryChanges(false)
   }, [unitId])
 
   useEffect(() => {
     const onBeforeUnload = (e) => {
-      if (!hasLocalIncidenceEdits) return
+      if (!hasLocalIncidenceEdits && !inventoryDirty) return
       e.preventDefault()
       e.returnValue = ''
     }
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [hasLocalIncidenceEdits])
+  }, [hasLocalIncidenceEdits, inventoryDirty])
+
+  useEffect(() => {
+    if (!inventoryDirty && !hasLocalIncidenceEdits) return
+    const onDocClickCapture = (e) => {
+      const anchor = e.target?.closest?.('a[href]')
+      if (!anchor) return
+      const href = anchor.getAttribute('href') || ''
+      if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) return
+      const currentPath = window.location.pathname + window.location.search
+      if (href === currentPath) return
+      const ok = window.confirm('Tienes cambios sin guardar. Pulsa "Actualizar inventario" y/o guarda incidencias antes de salir. ¿Quieres salir sin guardar?')
+      if (!ok) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }
+    document.addEventListener('click', onDocClickCapture, true)
+    return () => document.removeEventListener('click', onDocClickCapture, true)
+  }, [inventoryDirty, hasLocalIncidenceEdits])
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -186,7 +390,7 @@ export default function UnidadDetail() {
 
     const fallbackZone = allZones.find(z => {
       if (!itemParam) return false
-      return (items[unitId]?.[z.id] || []).some(it => String(it.name).trim().toLowerCase() === itemParam)
+      return (workingItems?.[z.id] || []).some(it => String(it.name).trim().toLowerCase() === itemParam)
     })
 
     const finalZone = zoneMatch || fallbackZone
@@ -197,15 +401,17 @@ export default function UnidadDetail() {
       let found = null
       searchZones.forEach(z => {
         if (found) return
-        found = (items[unitId]?.[z.id] || []).find(it => String(it.name).trim().toLowerCase() === itemParam) || null
+        found = (workingItems?.[z.id] || []).find(it => String(it.name).trim().toLowerCase() === itemParam) || null
       })
       setFocusedItemId(found?.id || null)
     }
-  }, [location.search, unitId, allZones, items])
+  }, [location.search, allZones, workingItems])
 
   const zonesToShow = selectedZone ? allZones.filter(z => z.id === selectedZone) : allZones
+  const canPortal = typeof window !== 'undefined' && typeof document !== 'undefined'
 
   return (
+    <>
     <div className="animate-in page-container">
 
       {/* Breadcrumb */}
@@ -226,20 +432,34 @@ export default function UnidadDetail() {
             {statusLabel[level]}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {hasLocalIncidenceEdits && (
-            <>
-              <button className="btn btn-ghost btn-sm" onClick={resetIncidenceDraft} disabled={savingIncidences}>
-                Descartar cambios
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {hasLocalIncidenceEdits && (
+              <>
+                <button className="btn btn-ghost btn-sm" onClick={resetIncidenceDraft} disabled={savingIncidences}>
+                  Descartar cambios
+                </button>
+                <button className="btn btn-primary btn-sm" onClick={saveIncidenceDraft} disabled={savingIncidences}>
+                  {savingIncidences ? 'Guardando...' : 'Guardar cambios de incidencias'}
+                </button>
+              </>
+            )}
+            {inventoryDirty && (
+              <button className="btn btn-ghost btn-sm" onClick={resetInventoryDraft} disabled={savingInventory}>
+                Descartar inventario
               </button>
-              <button className="btn btn-primary btn-sm" onClick={saveIncidenceDraft} disabled={savingIncidences}>
-                {savingIncidences ? 'Guardando...' : 'Guardar cambios de incidencias'}
-              </button>
-            </>
-          )}
-          <button className="btn btn-ghost btn-sm" onClick={openCfg}>⚙ Configurar</button>
-          <button className="btn btn-ghost btn-sm" onClick={() => setReviewModal(true)}>✔ Revisar unidad</button>
+            )}
+            <button className="btn btn-ghost btn-sm" onClick={openCfg}>⚙ Configurar</button>
+            <button
+              className={`btn btn-sm btn-inventory-update ${inventoryDirty ? 'btn-pending-save' : ''}`}
+              onClick={saveInventoryDraft}
+              disabled={savingInventory || !inventoryDirty}
+            >
+              {savingInventory ? 'Guardando inventario...' : '↻ Actualizar inventario'}
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={goToDailyRevision}>✔ Revisar unidad</button>
             <button className="btn btn-primary btn-sm" onClick={() => setAddModal(zones[0]?.id || allZones[0]?.id)}>＋ Añadir artículo</button>
+          </div>
         </div>
       </div>
 
@@ -262,7 +482,7 @@ export default function UnidadDetail() {
       {/* Review panel */}
       <ReviewPanel
         review={reviews[unitId]}
-        onOpenModal={() => setReviewModal(true)}
+        onOpenModal={goToDailyRevision}
       />
 
       {/* Truck diagram */}
@@ -275,23 +495,23 @@ export default function UnidadDetail() {
           {/* Cabina */}
           {(() => {
             const z = zones.find(z => z.id === 'cabina')
-            const st = zoneStatus(items[unitId]['cabina'])
-            return <ZoneBlock key="cabina" zone={z} status={st} items={items[unitId]['cabina']} selected={selectedZone === 'cabina'} onClick={() => setSelectedZone(selectedZone === 'cabina' ? null : 'cabina')} flex={1.3} />
+            const st = zoneStatus(workingItems?.['cabina'] || [])
+            return <ZoneBlock key="cabina" zone={z} status={st} items={workingItems?.['cabina'] || []} selected={selectedZone === 'cabina'} onClick={() => setSelectedZone(selectedZone === 'cabina' ? null : 'cabina')} flex={1.3} />
           })()}
 
           {/* Body: techo + cofres */}
           <div style={{ flex: 3, display: 'flex', flexDirection: 'column', gap: 6 }}>
             {cfg.hasTecho && (() => {
               const z = zones.find(z => z.id === 'techo')
-              const st = zoneStatus(items[unitId]['techo'])
-              return <ZoneBlock key="techo" zone={z} status={st} items={items[unitId]['techo']} selected={selectedZone === 'techo'} onClick={() => setSelectedZone(selectedZone === 'techo' ? null : 'techo')} flex={1} minH={44} />
+              const st = zoneStatus(workingItems?.['techo'] || [])
+              return <ZoneBlock key="techo" zone={z} status={st} items={workingItems?.['techo'] || []} selected={selectedZone === 'techo'} onClick={() => setSelectedZone(selectedZone === 'techo' ? null : 'techo')} flex={1} minH={44} />
             })()}
             <div style={{ display: 'flex', gap: 6 }}>
               {Array.from({ length: cfg.numCofres }, (_, i) => {
                 const zid = `cofre${i+1}`
                 const z = zones.find(z => z.id === zid)
-                const st = zoneStatus(items[unitId][zid] || [])
-                return <ZoneBlock key={zid} zone={z} status={st} items={items[unitId][zid] || []} selected={selectedZone === zid} onClick={() => setSelectedZone(selectedZone === zid ? null : zid)} flex={1} />
+                const st = zoneStatus(workingItems?.[zid] || [])
+                return <ZoneBlock key={zid} zone={z} status={st} items={workingItems?.[zid] || []} selected={selectedZone === zid} onClick={() => setSelectedZone(selectedZone === zid ? null : zid)} flex={1} />
               })}
             </div>
           </div>
@@ -299,8 +519,8 @@ export default function UnidadDetail() {
           {/* Trasera */}
           {cfg.hasTrasera && (() => {
             const z = zones.find(z => z.id === 'trasera')
-            const st = zoneStatus(items[unitId]['trasera'])
-            return <ZoneBlock key="trasera" zone={z} status={st} items={items[unitId]['trasera']} selected={selectedZone === 'trasera'} onClick={() => setSelectedZone(selectedZone === 'trasera' ? null : 'trasera')} flex={0.9} />
+            const st = zoneStatus(workingItems?.['trasera'] || [])
+            return <ZoneBlock key="trasera" zone={z} status={st} items={workingItems?.['trasera'] || []} selected={selectedZone === 'trasera'} onClick={() => setSelectedZone(selectedZone === 'trasera' ? null : 'trasera')} flex={0.9} />
           })()}
         </div>
 
@@ -317,7 +537,7 @@ export default function UnidadDetail() {
           <ZoneCard
             key={zone.id}
             zone={zone}
-            zoneItems={items[unitId][zone.id] || []}
+            zoneItems={workingItems?.[zone.id] || []}
             itemStates={draftItemStates}
             focusedItemId={focusedItemId}
             onSetOk={(itemId) => {
@@ -325,7 +545,19 @@ export default function UnidadDetail() {
               setDraftItemStates(prev => ({ ...prev, [itemId]: { status: current === 'ok' ? null : 'ok', note: '' } }))
               setHasLocalIncidenceEdits(true)
             }}
-            onSetIssue={(itemId, itemName) => { setIssueDraft(draftItemStates[itemId]?.note || ''); setIssueModal({ itemId, itemName, zoneId: zone.id, zoneLabel: zone.label }) }}
+            onSetIssue={async (itemId, itemName, currentStatus) => {
+              if (currentStatus === 'issue') {
+                const ok = window.confirm('¿Marcar esta incidencia como resuelta?')
+                if (!ok) return
+                setDraftItemStates(prev => ({ ...prev, [itemId]: { status: null, note: '' } }))
+                await setUnitItemState(unitId, itemId, { status: null, note: '' })
+                setHasLocalIncidenceEdits(false)
+                showToast('Incidencia resuelta', 'ok')
+                return
+              }
+              setIssueDraft(draftItemStates[itemId]?.note || '')
+              setIssueModal({ itemId, itemName, zoneId: zone.id, zoneLabel: zone.label })
+            }}
             onMarkAll={(zoneItems) => {
               const allOk = zoneItems.every(i => draftItemStates[i.id]?.status === 'ok')
               const next = { ...draftItemStates }
@@ -336,8 +568,27 @@ export default function UnidadDetail() {
               setHasLocalIncidenceEdits(true)
             }}
             onAdd={() => setAddModal(zone.id)}
-            onAdjust={(itemId, delta) => { updateQty(unitId, zone.id, itemId, delta) }}
-            onDelete={(itemId, name) => { deleteItem(unitId, zone.id, itemId); showToast(`Eliminado: ${name}`, 'warn') }}
+            onAdjust={(itemId, delta) => {
+              setDraftItems(prev => {
+                const zoneItems = (prev?.[zone.id] || []).map(it => {
+                  if (String(it.id) !== String(itemId)) return it
+                  return { ...it, qty: Math.max(0, (Number(it.qty) || 0) + delta) }
+                })
+                return { ...prev, [zone.id]: zoneItems }
+              })
+              setHasPendingInventoryChanges(true)
+            }}
+            onDelete={(itemId, name) => {
+              if (isPersistedItemId(itemId)) {
+                setDeletedItemIds(prev => Array.from(new Set([...prev, String(itemId)])))
+              }
+              setDraftItems(prev => ({
+                ...prev,
+                [zone.id]: (prev?.[zone.id] || []).filter(it => String(it.id) !== String(itemId)),
+              }))
+              setHasPendingInventoryChanges(true)
+              showToast(`Eliminado: ${name}`, 'warn')
+            }}
           />
         ))}
       </div>
@@ -392,9 +643,10 @@ export default function UnidadDetail() {
               <button
                 className="btn btn-primary btn-sm"
                 onClick={handleIssueSave}
+                disabled={issueSaving}
                 style={{ background: 'var(--red)', borderColor: 'var(--red)' }}
               >
-                ⚠ Guardar incidencia
+                {issueSaving ? 'Guardando...' : '⚠ Guardar incidencia'}
               </button>
             </>
           }
@@ -517,6 +769,17 @@ export default function UnidadDetail() {
         </Modal>
       )}
     </div>
+    {inventoryDirty && canPortal && createPortal(
+      <button
+        className="btn btn-sm btn-inventory-update btn-pending-save floating-inventory-save"
+        onClick={saveInventoryDraft}
+        disabled={savingInventory}
+      >
+        {savingInventory ? 'Guardando inventario...' : 'Guardar cambios'}
+      </button>,
+      document.body
+    )}
+    </>
   )
 }
 
@@ -642,7 +905,7 @@ function ZoneCard({ zone, zoneItems, itemStates, focusedItemId, onSetOk, onSetIs
             {(() => {
               const okCount    = zoneItems.filter(i => itemStates[i.id]?.status === 'ok').length
               const issueCount = zoneItems.filter(i => itemStates[i.id]?.status === 'issue').length
-              return <>{zoneItems.length} artículos{missing > 0 ? ` · ${missing} por reponer` : ''}{okCount > 0 && <span style={{ color: 'var(--green-l)' }}> · ✔ {okCount} ok</span>}{issueCount > 0 && <span style={{ color: 'var(--red-l)' }}> · ⚠ {issueCount} incidencia{issueCount > 1 ? 's' : ''}</span>}</>
+              return <>{zoneItems.length} artículos{missing > 0 ? ` · ${missing} por reponer` : ''}{okCount > 0 && <span style={{ color: 'var(--green-l)' }}> · ✔ {okCount} ok</span>}{issueCount > 0 && <span style={{ color: 'var(--red-l)' }}> · ⚠ {issueCount}</span>}</>
             })()}
           </div>
         </div>
@@ -668,7 +931,16 @@ function ZoneCard({ zone, zoneItems, itemStates, focusedItemId, onSetOk, onSetIs
         <div style={{ padding: '16px 18px', fontSize: 13, color: 'var(--mid)' }}>Sin artículos.</div>
       ) : (
         zoneItems.map(item => (
-          <ItemRow key={item.id} item={item} highlighted={String(item.id) === String(focusedItemId)} itemState={itemStates[item.id] || { status: null, note: '' }} onSetOk={() => onSetOk(item.id)} onSetIssue={() => onSetIssue(item.id, item.name)} onAdjust={d => onAdjust(item.id, d)} onDelete={() => onDelete(item.id, item.name)} />
+          <ItemRow
+            key={item.id}
+            item={item}
+            highlighted={String(item.id) === String(focusedItemId)}
+            itemState={itemStates[item.id] || { status: null, note: '' }}
+            onSetOk={() => onSetOk(item.id)}
+            onSetIssue={() => onSetIssue(item.id, item.name, (itemStates[item.id]?.status || null))}
+            onAdjust={d => onAdjust(item.id, d)}
+            onDelete={() => onDelete(item.id, item.name)}
+          />
         ))
       )}
 
@@ -705,9 +977,10 @@ function ItemRow({ item, itemState, highlighted = false, onSetOk, onSetIssue, on
     <div style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
       <div
         style={{
-          display: 'flex',
+          display: 'grid',
+          gridTemplateColumns: '86px minmax(0,1fr) 118px',
           alignItems: 'center',
-          gap: 8,
+          columnGap: 10,
           padding: '9px 18px',
           background: rowBg,
           transition: 'background 0.15s',
@@ -718,75 +991,125 @@ function ItemRow({ item, itemState, highlighted = false, onSetOk, onSetIssue, on
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
       >
-        {/* ✔ OK checkbox */}
-        <div
-          onClick={onSetOk}
-          title={status === 'ok' ? 'Quitar revisión OK' : 'Marcar como OK'}
-          style={{
-            width: 22, height: 22, borderRadius: 6, flexShrink: 0, cursor: 'pointer',
-            border: status === 'ok' ? '2px solid var(--green)' : '2px solid var(--border2)',
-            background: status === 'ok' ? 'var(--green)' : 'transparent',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            transition: 'all 0.15s',
-            boxShadow: status === 'ok' ? '0 0 8px rgba(39,174,96,0.3)' : 'none',
-          }}
-        >
-          {status === 'ok' && (
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          {/* ✔ OK checkbox */}
+          <div
+            onClick={onSetOk}
+            title={status === 'ok' ? 'Quitar revisión OK' : 'Marcar como OK'}
+            style={{
+              width: 22, height: 22, borderRadius: 6, flexShrink: 0, cursor: 'pointer',
+              border: status === 'ok' ? '2px solid var(--green)' : '2px solid var(--border2)',
+              background: status === 'ok' ? 'var(--green)' : 'transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'all 0.15s',
+              boxShadow: status === 'ok' ? '0 0 8px rgba(39,174,96,0.3)' : 'none',
+            }}
+          >
+            {status === 'ok' && (
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            )}
+          </div>
+
+          {/* ✕ Incidencia checkbox */}
+          <div
+            onClick={onSetIssue}
+            title={status === 'issue' ? 'Editar incidencia' : 'Marcar incidencia'}
+            style={{
+              width: 22, height: 22, borderRadius: 6, flexShrink: 0, cursor: 'pointer',
+              border: status === 'issue' ? '2px solid var(--red)' : '2px solid var(--border2)',
+              background: status === 'issue' ? 'var(--red)' : 'transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'all 0.15s',
+              boxShadow: status === 'issue' ? '0 0 8px rgba(192,57,43,0.35)' : 'none',
+            }}
+          >
+            {status === 'issue' && (
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                <path d="M2 2l6 6M8 2l-6 6" stroke="#fff" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+            )}
+          </div>
+
+          <div style={{ width: 3, height: 32, borderRadius: 2, background: barColor, flexShrink: 0 }} />
         </div>
 
-        {/* ✕ Incidencia checkbox */}
-        <div
-          onClick={onSetIssue}
-          title={status === 'issue' ? 'Editar incidencia' : 'Marcar incidencia'}
-          style={{
-            width: 22, height: 22, borderRadius: 6, flexShrink: 0, cursor: 'pointer',
-            border: status === 'issue' ? '2px solid var(--red)' : '2px solid var(--border2)',
-            background: status === 'issue' ? 'var(--red)' : 'transparent',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            transition: 'all 0.15s',
-            boxShadow: status === 'issue' ? '0 0 8px rgba(192,57,43,0.35)' : 'none',
-          }}
-        >
-          {status === 'issue' && (
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-              <path d="M2 2l6 6M8 2l-6 6" stroke="#fff" strokeWidth="2" strokeLinecap="round"/>
-            </svg>
-          )}
-        </div>
-
-        <div style={{ width: 3, height: 32, borderRadius: 2, background: barColor, flexShrink: 0 }} />
-
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 500, textDecoration: status === 'ok' ? 'line-through' : 'none', color: status === 'ok' ? 'var(--mid)' : status === 'issue' ? 'var(--red-l)' : 'inherit' }}>
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              lineHeight: 1.25,
+              textDecoration: status === 'ok' ? 'line-through' : 'none',
+              color: status === 'ok' ? 'var(--mid)' : status === 'issue' ? 'var(--red-l)' : 'inherit',
+              whiteSpace: 'normal',
+              wordBreak: 'normal',
+              overflowWrap: 'break-word',
+            }}
+          >
             {item.name}
           </div>
-          {item.desc && <div style={{ fontSize: 11, color: 'var(--mid)' }}>{item.desc}</div>}
+          {item.desc && (
+            <div
+              style={{
+                fontSize: 11,
+                color: 'var(--mid)',
+                lineHeight: 1.2,
+                wordBreak: 'normal',
+                overflowWrap: 'break-word',
+              }}
+            >
+              {item.desc}
+            </div>
+          )}
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              marginTop: 4,
+              opacity: (hover || status === 'issue') ? 1 : 0,
+              transition: 'opacity 0.15s',
+              pointerEvents: (hover || status === 'issue') ? 'auto' : 'none',
+              minHeight: 20,
+            }}
+          >
+            {(isMissing || isLow) && status !== 'ok' && status !== 'issue' && (
+              <span style={{ fontSize: 9, fontWeight: 700, color: isMissing ? 'var(--red-l)' : 'var(--yellow-l)', background: isMissing ? 'rgba(192,57,43,0.15)' : 'rgba(230,126,34,0.15)', border: `1px solid ${isMissing ? 'rgba(192,57,43,0.3)' : 'rgba(230,126,34,0.3)'}`, padding: '2px 7px', borderRadius: 10, textTransform: 'uppercase' }}>
+                {isMissing ? '!' : '↓'}
+              </span>
+            )}
+            {status === 'ok' && (
+              <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--green-l)', background: 'rgba(39,174,96,0.12)', border: '1px solid rgba(39,174,96,0.25)', padding: '2px 7px', borderRadius: 10, textTransform: 'uppercase' }}>✔</span>
+            )}
+            {status === 'issue' && (
+              <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--red-l)', background: 'rgba(192,57,43,0.15)', border: '1px solid rgba(192,57,43,0.3)', padding: '2px 7px', borderRadius: 10, textTransform: 'uppercase' }}>⚠</span>
+            )}
+            {status !== 'issue' && (
+              <button className="btn-icon" style={{ color: 'var(--red-l)', width: 28, height: 28, fontSize: 12 }} onClick={onDelete}>✕</button>
+            )}
+          </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {(isMissing || isLow) && status !== 'ok' && status !== 'issue' && (
-            <span style={{ fontSize: 9, fontWeight: 700, color: isMissing ? 'var(--red-l)' : 'var(--yellow-l)', background: isMissing ? 'rgba(192,57,43,0.15)' : 'rgba(230,126,34,0.15)', border: `1px solid ${isMissing ? 'rgba(192,57,43,0.3)' : 'rgba(230,126,34,0.3)'}`, padding: '2px 7px', borderRadius: 10, textTransform: 'uppercase' }}>
-              {isMissing ? 'FALTA' : 'BAJO'}
-            </span>
-          )}
-          {status === 'ok' && (
-            <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--green-l)', background: 'rgba(39,174,96,0.12)', border: '1px solid rgba(39,174,96,0.25)', padding: '2px 7px', borderRadius: 10, textTransform: 'uppercase' }}>✔ OK</span>
-          )}
-          {status === 'issue' && (
-            <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--red-l)', background: 'rgba(192,57,43,0.15)', border: '1px solid rgba(192,57,43,0.3)', padding: '2px 7px', borderRadius: 10, textTransform: 'uppercase' }}>⚠ INCIDENCIA</span>
-          )}
-          <button className="btn-icon" style={{ fontSize: 16 }} onClick={() => onAdjust(-1)}>−</button>
-          <span style={{ fontFamily: 'Roboto Mono', fontSize: 14, fontWeight: 500, color: qtyColor, minWidth: 24, textAlign: 'center' }}>{item.qty}</span>
-          <button className="btn-icon" style={{ fontSize: 16 }} onClick={() => onAdjust(1)}>＋</button>
-          <span style={{ fontSize: 11, color: 'var(--mid)', marginLeft: 2 }}>/ {item.min}</span>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            gap: 4,
+            whiteSpace: 'nowrap'
+          }}
+        >
+          <button className="btn-icon" style={{ fontSize: 13, width: 30, height: 30 }} onClick={() => onAdjust(-1)}>−</button>
+          <span style={{ fontFamily: 'Roboto Mono', fontSize: 13, fontWeight: 700, color: qtyColor, minWidth: 20, textAlign: 'center', lineHeight: 1 }}>
+            {item.qty}
+          </span>
+          <button className="btn-icon" style={{ fontSize: 13, width: 30, height: 30 }} onClick={() => onAdjust(1)}>＋</button>
+          <span style={{ fontSize: 10, color: 'var(--mid)', lineHeight: 1, minWidth: 20, textAlign: 'left' }}>/ {item.min}</span>
         </div>
-        {hover && status !== 'issue' && (
-          <button className="btn-icon" style={{ color: 'var(--red-l)', marginLeft: 4 }} onClick={onDelete}>✕</button>
-        )}
       </div>
 
       {/* Nota de incidencia inline */}

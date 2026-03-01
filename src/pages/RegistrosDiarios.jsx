@@ -51,7 +51,8 @@ function fmtDate(dateStr) {
 }
 
 export default function RegistrosDiarios() {
-  const { showToast, refreshRevisionIncidents, isAdmin } = useApp()
+  const { showToast, refreshRevisionIncidents, isAdmin, hasPermission } = useApp()
+  const canEdit = hasPermission('edit')
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -63,8 +64,20 @@ export default function RegistrosDiarios() {
   const [saving, setSaving] = useState(false)
   const [deletingAll, setDeletingAll] = useState(false)
   const [photoViewer, setPhotoViewer] = useState(null) // { urls: string[], index: number, title?: string }
+  const [resolvedHistory, setResolvedHistory] = useState([])
+  const [loadingResolvedHistory, setLoadingResolvedHistory] = useState(false)
+  const [resolvedHistoryError, setResolvedHistoryError] = useState('')
+  const [resolvedDateFilter, setResolvedDateFilter] = useState('')
+  const [resolvedUnitFilter, setResolvedUnitFilter] = useState('')
+  const [inventoryLog, setInventoryLog] = useState([])
+  const [loadingInventoryLog, setLoadingInventoryLog] = useState(false)
+  const [inventoryLogError, setInventoryLogError] = useState('')
 
-  useEffect(() => { loadReports() }, [])
+  useEffect(() => {
+    loadReports()
+    loadResolvedHistory()
+    loadInventoryLog()
+  }, [])
 
   async function loadReports() {
     setLoading(true)
@@ -98,6 +111,39 @@ export default function RegistrosDiarios() {
     setLoading(false)
   }
 
+  async function loadResolvedHistory() {
+    setLoadingResolvedHistory(true)
+    setResolvedHistoryError('')
+    const { data, error } = await supabase
+      .from('incident_history')
+      .select('id, created_at, event_type, report_date, bombero_id, unit_id, zone, item, note, source, changed_by')
+      .eq('event_type', 'resolved')
+      .order('created_at', { ascending: false })
+      .limit(120)
+    setLoadingResolvedHistory(false)
+    if (error) {
+      setResolvedHistoryError(error.message || 'No se pudo cargar historial de incidencias resueltas')
+      return
+    }
+    setResolvedHistory(data || [])
+  }
+
+  async function loadInventoryLog() {
+    setLoadingInventoryLog(true)
+    setInventoryLogError('')
+    const { data, error } = await supabase
+      .from('inventory_change_log')
+      .select('id, created_at, unit_id, unit_label, zone_id, item_name, change_type, detail, changed_by')
+      .order('created_at', { ascending: false })
+      .limit(120)
+    setLoadingInventoryLog(false)
+    if (error) {
+      setInventoryLogError(error.message || 'No se pudo cargar el registro de inventario')
+      return
+    }
+    setInventoryLog(data || [])
+  }
+
   const filtered = useMemo(() => {
     return reports.filter(r => {
       if (dateFilter && r.report_date !== dateFilter) return false
@@ -121,7 +167,24 @@ export default function RegistrosDiarios() {
     })
   }, [filtered, dateOrder])
 
+  const filteredResolvedHistory = useMemo(() => {
+    return (resolvedHistory || []).filter(row => {
+      if (resolvedDateFilter) {
+        const d = row.created_at ? new Date(row.created_at).toISOString().slice(0, 10) : ''
+        if (d !== resolvedDateFilter) return false
+      }
+      if (resolvedUnitFilter) {
+        if (String(row.unit_id) !== String(resolvedUnitFilter)) return false
+      }
+      return true
+    })
+  }, [resolvedHistory, resolvedDateFilter, resolvedUnitFilter])
+
   async function saveEdit() {
+    if (!canEdit) {
+      showToast('Solo lectura: no puedes editar informes', 'warn')
+      return
+    }
     if (!editState) return
     setSaving(true)
     const payload = {
@@ -144,6 +207,10 @@ export default function RegistrosDiarios() {
   }
 
   async function deleteReport(reportId) {
+    if (!canEdit) {
+      showToast('Solo lectura: no puedes borrar informes', 'warn')
+      return
+    }
     const ok = window.confirm('¿Seguro que quieres borrar este informe?')
     if (!ok) return
     const { error } = await supabase.from('revision_reports').delete().eq('id', reportId)
@@ -153,10 +220,16 @@ export default function RegistrosDiarios() {
     }
     showToast('Informe borrado', 'warn')
     await loadReports()
+    await loadResolvedHistory()
+    await loadInventoryLog()
     await refreshRevisionIncidents()
   }
 
   async function deleteGroup(group) {
+    if (!canEdit) {
+      showToast('Solo lectura: no puedes borrar bloques', 'warn')
+      return
+    }
     const ok = window.confirm(`¿Borrar todos los informes de BV${group.bomberoId} del ${group.date}?`)
     if (!ok) return
     const ids = group.reports.map(r => r.id)
@@ -167,6 +240,8 @@ export default function RegistrosDiarios() {
     }
     showToast('Bloque eliminado', 'warn')
     await loadReports()
+    await loadResolvedHistory()
+    await loadInventoryLog()
     await refreshRevisionIncidents()
   }
 
@@ -225,6 +300,8 @@ export default function RegistrosDiarios() {
     } finally {
       setDeletingAll(false)
       await loadReports()
+      await loadResolvedHistory()
+      await loadInventoryLog()
       await refreshRevisionIncidents()
     }
   }
@@ -244,7 +321,7 @@ export default function RegistrosDiarios() {
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button className="btn btn-ghost btn-sm" onClick={loadReports}>↻ Recargar</button>
-          {isAdmin && (
+          {isAdmin && canEdit && (
             <button className="btn btn-danger btn-sm" onClick={deleteAllReports} disabled={deletingAll}>
               {deletingAll ? 'Borrando...' : 'Borrar todo'}
             </button>
@@ -285,6 +362,171 @@ export default function RegistrosDiarios() {
         </div>
       </div>
 
+      <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--mid)', letterSpacing: 1.5, textTransform: 'uppercase', fontWeight: 700 }}>
+              Registro de cambios de inventario
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--mid)', marginTop: 4 }}>
+              Cualquier alta, baja, edición o cambio de cantidad queda guardado aquí.
+            </div>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={loadInventoryLog}>↻ Recargar inventario</button>
+        </div>
+
+        {loadingInventoryLog ? (
+          <div style={{ color: 'var(--mid)', fontSize: 13 }}>Cargando cambios de inventario...</div>
+        ) : inventoryLogError ? (
+          <div style={{ color: 'var(--red-l)', fontSize: 13 }}>
+            Error: {inventoryLogError}. Ejecuta `inventory-change-log.sql` en Supabase.
+          </div>
+        ) : inventoryLog.length === 0 ? (
+          <div style={{ color: 'var(--mid)', fontSize: 13 }}>Aún no hay cambios de inventario registrados.</div>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Unidad</th>
+                  <th>Zona</th>
+                  <th>Artículo</th>
+                  <th>Cambio</th>
+                  <th>Detalle</th>
+                  <th>Por</th>
+                </tr>
+              </thead>
+              <tbody>
+                {inventoryLog.map(row => (
+                  <tr key={row.id}>
+                    <td style={{ fontSize: 12, color: 'var(--mid)' }}>
+                      {row.created_at ? new Date(row.created_at).toLocaleString('es-ES') : '—'}
+                    </td>
+                    <td style={{ fontFamily: 'Barlow Condensed', fontSize: 15, fontWeight: 800 }}>
+                      {row.unit_label || `U${String(row.unit_id || '').padStart(2, '0')}`}
+                    </td>
+                    <td>{row.zone_id || '—'}</td>
+                    <td>{row.item_name || '—'}</td>
+                    <td style={{ fontSize: 12, color: 'var(--mid)' }}>{row.change_type || '—'}</td>
+                    <td style={{ fontSize: 12 }}>{row.detail || '—'}</td>
+                    <td style={{ fontSize: 12, color: 'var(--mid)' }}>{row.changed_by || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--mid)', letterSpacing: 1.5, textTransform: 'uppercase', fontWeight: 700 }}>
+              Historial de incidencias resueltas
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--mid)', marginTop: 4 }}>
+              Aunque una incidencia ya no esté activa, queda registrada como resuelta.
+            </div>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={loadResolvedHistory}>↻ Recargar historial</button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 180px auto', gap: 10, marginBottom: 10 }}>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Filtrar por fecha resuelta</label>
+            <input
+              className="form-input"
+              type="date"
+              value={resolvedDateFilter}
+              onChange={e => setResolvedDateFilter(e.target.value)}
+            />
+          </div>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Unidad</label>
+            <input
+              className="form-input"
+              type="number"
+              min="0"
+              placeholder="Ej: 19"
+              value={resolvedUnitFilter}
+              onChange={e => setResolvedUnitFilter(e.target.value)}
+            />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'end' }}>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => { setResolvedDateFilter(''); setResolvedUnitFilter('') }}
+            >
+              Limpiar
+            </button>
+          </div>
+        </div>
+
+        {loadingResolvedHistory ? (
+          <div style={{ color: 'var(--mid)', fontSize: 13 }}>Cargando historial...</div>
+        ) : resolvedHistoryError ? (
+          <div style={{ color: 'var(--red-l)', fontSize: 13 }}>
+            Error: {resolvedHistoryError}. Ejecuta `incident-history.sql` en Supabase.
+          </div>
+        ) : filteredResolvedHistory.length === 0 ? (
+          <div style={{ color: 'var(--mid)', fontSize: 13 }}>Todavía no hay incidencias resueltas registradas.</div>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Resuelta</th>
+                  <th>Estado</th>
+                  <th>Unidad</th>
+                  <th>Zona</th>
+                  <th>Artículo</th>
+                  <th>Origen</th>
+                  <th>Por</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredResolvedHistory.map(row => (
+                  <tr key={row.id}>
+                    <td style={{ fontSize: 12, color: 'var(--mid)' }}>
+                      {row.created_at ? new Date(row.created_at).toLocaleString('es-ES') : '—'}
+                    </td>
+                    <td>
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          padding: '3px 10px',
+                          borderRadius: 999,
+                          fontSize: 11,
+                          fontWeight: 800,
+                          letterSpacing: 0.7,
+                          textTransform: 'uppercase',
+                          color: '#ffb55e',
+                          background: 'rgba(230,126,34,0.16)',
+                          border: '1px solid rgba(230,126,34,0.45)',
+                        }}
+                      >
+                        Incidencia resuelta
+                      </span>
+                    </td>
+                    <td style={{ fontFamily: 'Barlow Condensed', fontSize: 15, fontWeight: 800 }}>
+                      U{String(row.unit_id).padStart(2, '0')}
+                    </td>
+                    <td>{row.zone || '—'}</td>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{row.item || '—'}</div>
+                      {row.note ? <div style={{ fontSize: 11, color: 'var(--mid)' }}>{row.note}</div> : null}
+                    </td>
+                    <td style={{ fontSize: 12, color: 'var(--mid)' }}>{row.source || '—'}</td>
+                    <td style={{ fontSize: 12, color: 'var(--mid)' }}>{row.changed_by || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {loading ? (
         <div className="card" style={{ padding: 30, color: 'var(--mid)' }}>Cargando registros...</div>
       ) : loadError ? (
@@ -307,7 +549,11 @@ export default function RegistrosDiarios() {
                     <div className="card-title">BV{group.bomberoId} · {fmtDate(group.date)}</div>
                     <div style={{ fontSize: 11, color: 'var(--mid)', marginTop: 2 }}>{group.reports.length} unidad(es) · {incidentsCount} incidencia(s)</div>
                   </div>
-                  <button className="btn btn-danger btn-sm" onClick={() => deleteGroup(group)}>Borrar bloque</button>
+                  {canEdit ? (
+                    <button className="btn btn-danger btn-sm" onClick={() => deleteGroup(group)}>Borrar bloque</button>
+                  ) : (
+                    <span className="chip chip-gray">Solo lectura</span>
+                  )}
                 </div>
                 <div className="table-wrap"><table className="table">
                   <thead>
@@ -346,8 +592,14 @@ export default function RegistrosDiarios() {
                         </td>
                         <td style={{ fontSize: 12, color: 'var(--mid)' }}>{r.reviewed_by || '—'}</td>
                         <td className="reg-row-actions" style={{ display: 'flex', gap: 6 }}>
-                          <button className="btn btn-ghost btn-sm" onClick={() => setEditState(emptyEditState(r))}>Editar</button>
-                          <button className="btn btn-danger btn-sm" onClick={() => deleteReport(r.id)}>Borrar</button>
+                          {canEdit ? (
+                            <>
+                              <button className="btn btn-ghost btn-sm" onClick={() => setEditState(emptyEditState(r))}>Editar</button>
+                              <button className="btn btn-danger btn-sm" onClick={() => deleteReport(r.id)}>Borrar</button>
+                            </>
+                          ) : (
+                            <span className="chip chip-gray">Solo lectura</span>
+                          )}
                         </td>
                       </tr>
                     ))}

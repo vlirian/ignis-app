@@ -1,13 +1,25 @@
+import { useEffect, useMemo, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useApp } from '../lib/AppContext'
-import { UNIT_IDS, buildZones, unitAlertLevel } from '../data/units'
+import { supabase } from '../lib/supabase'
+import { buildZones, unitAlertLevel } from '../data/units'
 import styles from './Sidebar.module.css'
+
+const BV_UNITS = {
+  1: [3, 7, 19],
+  2: [0, 6, 14],
+  3: [1, 16, 22],
+  4: [10, 11, 15],
+  5: [4, 9, 18, 21],
+  6: [2, 12, 17],
+  7: [5, 8, 20],
+}
 
 const NAV = [
   { to: '/panel',        icon: '📊', label: 'Panel General' },
   { to: '/alertas',      icon: '🚨', label: 'Alertas',       badge: 'alert' },
   { to: '/unidades',     icon: '🚒', label: 'Unidades' },
-  { to: '/revision',     icon: '📅', label: 'Revisión' },
+  { to: '/revision',     icon: '📅', label: 'Revisión diaria' },
   { to: '/registros',    icon: '🗂️', label: 'Registros diarios' },
   { to: '/epi',          icon: '🦺', label: 'EPI' },
   { to: '/herramientas', icon: '⚙️',  label: 'Herramientas' },
@@ -15,14 +27,30 @@ const NAV = [
   { to: '/mantenimiento',icon: '🔧', label: 'Mantenimiento' },
   { to: '/turnos',       icon: '📋', label: 'Turnos' },
   { to: '/admin',        icon: '🛡️', label: 'Administración', adminOnly: true },
+  { to: '/informe-incidencias', icon: '🧾', label: 'Informe incidencias', adminOnly: true },
 ]
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function getActiveUnitsForBv(bvId, configs) {
+  return (BV_UNITS[bvId] || []).filter(unitId => configs?.[unitId]?.isActive !== false)
+}
 
 export default function Sidebar({ open, onClose }) {
   const { configs, items, isAdmin, revisionIncidents } = useApp()
   const navItems = NAV.filter(item => !item.adminOnly || isAdmin)
+  const [revisionPending, setRevisionPending] = useState(false)
 
-  const stockAlertUnits = UNIT_IDS.reduce((acc, id) => {
+  const activeUnitIds = Object.keys(configs || {})
+    .map(Number)
+    .filter(Number.isFinite)
+    .filter(id => configs[id]?.isActive !== false)
+
+  const stockAlertUnits = activeUnitIds.reduce((acc, id) => {
     const cfg = configs[id]
+    if (!cfg) return acc
     const zones = buildZones(cfg.numCofres, cfg.hasTecho, cfg.hasTrasera)
     const level = unitAlertLevel(items[id], zones)
     return level === 'alert' ? acc + 1 : acc
@@ -31,6 +59,7 @@ export default function Sidebar({ open, onClose }) {
   const reviewAlertCount = (() => {
     const keys = new Set()
     ;(revisionIncidents || []).forEach(inc => {
+      if (configs[inc.unitId]?.isActive === false) return
       const key = `${inc.unitId}|${String(inc.zone || '').trim().toLowerCase()}|${String(inc.item || '').trim().toLowerCase()}`
       keys.add(key)
     })
@@ -39,6 +68,69 @@ export default function Sidebar({ open, onClose }) {
 
   const totalAlerts = stockAlertUnits + reviewAlertCount
   const hasActiveAlerts = totalAlerts > 0
+
+  const activeUnitsByBv = useMemo(() => {
+    const map = {}
+    Object.keys(BV_UNITS).forEach((raw) => {
+      const bvId = Number(raw)
+      map[bvId] = getActiveUnitsForBv(bvId, configs)
+    })
+    return map
+  }, [configs])
+
+  useEffect(() => {
+    let mounted = true
+
+    async function refreshRevisionPending() {
+      try {
+        const today = todayStr()
+        const { data, error } = await supabase
+          .from('revision_reports')
+          .select('bombero_id,unit_id,reviewed_by')
+          .eq('report_date', today)
+
+        if (error) {
+          if (mounted) setRevisionPending(false)
+          return
+        }
+
+        let pending = false
+        for (const raw of Object.keys(BV_UNITS)) {
+          const bvId = Number(raw)
+          const requiredUnits = activeUnitsByBv[bvId] || []
+          if (requiredUnits.length === 0) continue
+
+          const doneUnits = new Set(
+            (data || [])
+              .filter(r => Number(r.bombero_id) === bvId)
+              .filter(r => r.reviewed_by !== 'unidades')
+              .map(r => Number(r.unit_id))
+          )
+
+          const allDone = requiredUnits.every(u => doneUnits.has(Number(u)))
+          if (!allDone) {
+            pending = true
+            break
+          }
+        }
+
+        if (mounted) setRevisionPending(pending)
+      } catch {
+        if (mounted) setRevisionPending(false)
+      }
+    }
+
+    refreshRevisionPending()
+    const timer = window.setInterval(refreshRevisionPending, 45000)
+    const onFocus = () => refreshRevisionPending()
+    window.addEventListener('focus', onFocus)
+
+    return () => {
+      mounted = false
+      window.clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [activeUnitsByBv])
 
   return (
     <>
@@ -63,7 +155,12 @@ export default function Sidebar({ open, onClose }) {
 
           <div className={styles.sectionLabel}>Operaciones</div>
           {navItems.filter(i => ['/unidades', '/revision', '/registros'].includes(i.to)).map(item => (
-            <NavItem key={item.to} item={item} onClose={onClose} />
+            <NavItem
+              key={item.to}
+              item={item}
+              onClose={onClose}
+              reviewPending={item.to === '/revision' ? revisionPending : false}
+            />
           ))}
 
           <div className={styles.sectionLabel}>Material</div>
@@ -72,7 +169,7 @@ export default function Sidebar({ open, onClose }) {
           ))}
 
           <div className={styles.sectionLabel}>Sistema</div>
-          {navItems.filter(i => ['/mantenimiento', '/turnos', '/admin'].includes(i.to)).map(item => (
+          {navItems.filter(i => ['/mantenimiento', '/turnos', '/admin', '/informe-incidencias'].includes(i.to)).map(item => (
             <NavItem key={item.to} item={item} onClose={onClose} />
           ))}
         </nav>
@@ -86,7 +183,7 @@ export default function Sidebar({ open, onClose }) {
   )
 }
 
-function NavItem({ item, alerts = 0, pulse = false, onClose }) {
+function NavItem({ item, alerts = 0, pulse = false, reviewPending = false, onClose }) {
   return (
     <NavLink
       to={item.to}
@@ -96,6 +193,7 @@ function NavItem({ item, alerts = 0, pulse = false, onClose }) {
     >
       <span className={`${styles.navIcon} ${pulse ? styles.alertPulse : ''}`}>{item.icon}</span>
       <span className={styles.navLabel}>{item.label}</span>
+      {reviewPending && <span className={`${styles.pendingChip} ${styles.pendingPulse}`}>pend.</span>}
       {alerts > 0 && <span className={`${styles.badge} ${pulse ? styles.badgePulse : ''}`}>{alerts}</span>}
     </NavLink>
   )

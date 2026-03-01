@@ -14,6 +14,7 @@ import Alertas from './pages/Alertas'
 import Revision from './pages/Revision'
 import RegistrosDiarios from './pages/RegistrosDiarios'
 import Administracion from './pages/Administracion'
+import InformeDiarioIncidencias from './pages/InformeDiarioIncidencias'
 import { EPI, Herramientas, Sanitario, Mantenimiento, Turnos } from './pages/Placeholders'
 
 const PAGE_TITLES = {
@@ -24,6 +25,7 @@ const PAGE_TITLES = {
   '/revision':      'Revisión Diaria',
   '/registros':     'Registros Diarios',
   '/admin':         'Administración',
+  '/informe-incidencias': 'Informe diario de incidencias',
   '/epi':           'EPI',
   '/herramientas':  'Herramientas',
   '/sanitario':     'Sanitario',
@@ -100,6 +102,7 @@ function AppInner() {
           <Route path="/revision"      element={<Revision />} />
           <Route path="/registros"     element={<RegistrosDiarios />} />
           <Route path="/admin"         element={<Administracion />} />
+          <Route path="/informe-incidencias" element={<InformeDiarioIncidencias />} />
           <Route path="/epi"           element={<EPI />} />
           <Route path="/herramientas"  element={<Herramientas />} />
           <Route path="/sanitario"     element={<Sanitario />} />

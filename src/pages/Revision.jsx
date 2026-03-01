@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useApp } from '../lib/AppContext'
 import { buildZones } from '../data/units'
 import { supabase } from '../lib/supabase'
+import { buildAndStoreDailyIncidentReport } from '../lib/dailyIncidentReport'
 
 // ── Asignación BV → Unidades ──────────────────────────────
 const BV_UNITS = {
@@ -24,6 +26,10 @@ const BV_COLORS = {
   7: { bg: 'rgba(241,196,15,0.12)', border: '#F39C12', text: '#F1C40F' },
 }
 const PHOTO_NOTES_MARKER = '[[FOTOS_REVISION]]'
+
+function getActiveUnitsForBv(bvId, configs) {
+  return (BV_UNITS[bvId] || []).filter(unitId => configs?.[unitId]?.isActive !== false)
+}
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10)
@@ -73,8 +79,10 @@ function composeNotesWithPhotoUrls(notes = '', photoUrls = []) {
 
 // ── VISTA PRINCIPAL ───────────────────────────────────────
 export default function Revision() {
-  const { configs, items, session, revisionIncidents, refreshRevisionIncidents, showToast } = useApp()
+  const location = useLocation()
+  const { configs, items, session, revisionIncidents, refreshRevisionIncidents, showToast, hasPermission } = useApp()
   const now = new Date()
+  const lastAutoOpenNonce = useRef(null)
 
   const [view, setView] = useState('calendar') // 'calendar' | 'review'
   const [reviewState, setReviewState] = useState(null)
@@ -112,8 +120,12 @@ export default function Revision() {
   })
 
   // Iniciar revisión — crea estructura con todos los artículos de todas las unidades
-  function startReview(date, bomberoId) {
-    const unitIds = BV_UNITS[bomberoId]
+  function startReview(date, bomberoId, preferredUnitId = null) {
+    const unitIds = getActiveUnitsForBv(bomberoId, configs)
+    if (unitIds.length === 0) {
+      showToast('Este bombero no tiene unidades activas asignadas', 'warn')
+      return
+    }
     const alreadyDone = (reportIndex[`${date}-${bomberoId}`] || [])
       .filter(r => r.reviewed_by !== 'unidades')
       .map(r => r.unit_id)
@@ -185,12 +197,41 @@ export default function Revision() {
       }
     })
 
-    setReviewState({ date, bomberoId, activeUnitIdx: null, units })
+    const preferredIdx = Number.isFinite(Number(preferredUnitId))
+      ? units.findIndex(u => Number(u.unitId) === Number(preferredUnitId))
+      : -1
+    setReviewState({ date, bomberoId, activeUnitIdx: preferredIdx >= 0 ? preferredIdx : null, units })
     setView('review')
   }
 
+  useEffect(() => {
+    const st = location.state || {}
+    const nonce = st?.reviewNonce || null
+    if (!st?.openUnitReview || !nonce) return
+    if (lastAutoOpenNonce.current === nonce) return
+    const targetUnitId = Number(st?.fromUnitId)
+    if (!Number.isFinite(targetUnitId)) return
+
+    let targetBv = null
+    for (const [bvId] of Object.entries(BV_UNITS)) {
+      const activeUnits = getActiveUnitsForBv(Number(bvId), configs)
+      if ((activeUnits || []).includes(targetUnitId)) {
+        targetBv = Number(bvId)
+        break
+      }
+    }
+    if (!Number.isFinite(targetBv)) return
+
+    lastAutoOpenNonce.current = nonce
+    startReview(todayStr(), targetBv, targetUnitId)
+  }, [location.state, reports, configs, items])
+
   // Guardar toda la revisión en Supabase
   async function saveReview() {
+    if (!hasPermission('edit')) {
+      showToast('Modo solo lectura: no puedes guardar revisiones', 'warn')
+      return
+    }
     const pendingByUnit = (reviewState?.units || [])
       .map(u => ({
         unitId: u.unitId,
@@ -318,6 +359,26 @@ export default function Revision() {
         console.warn('No se pudo enviar email de incidencias:', notifyErr.message || notifyErr)
         showToast('Revisión guardada. El aviso por email no se pudo enviar.', 'warn')
       }
+    }
+
+    const dailyRes = await buildAndStoreDailyIncidentReport({
+      supabase,
+      reportDate: date,
+      configs,
+      actorEmail: email,
+      bvUnits: BV_UNITS,
+      force: false,
+    })
+    if (!dailyRes?.ok) {
+      const msg = String(dailyRes?.error || '')
+      if (msg.includes('daily_incident_reports')) {
+        showToast('No se generó informe diario: ejecuta daily-incident-reports.sql en Supabase', 'error')
+      } else {
+        showToast(`No se generó informe diario: ${msg || 'error'}`, 'error')
+      }
+      console.warn('No se pudo generar informe diario de incidencias:', dailyRes?.error || dailyRes)
+    } else if (dailyRes.generated) {
+      showToast('Informe diario de incidencias generado', 'ok')
     }
 
     setSaving(false)
@@ -539,7 +600,7 @@ export default function Revision() {
               <button
                 className="btn btn-primary btn-sm"
                 onClick={saveReview}
-                disabled={saving}
+                disabled={saving || !hasPermission('edit')}
                 style={{ background: 'var(--green)', borderColor: 'var(--green)' }}
               >
                 {saving ? 'Guardando...' : '✔ Guardar revisión completa'}
@@ -673,7 +734,7 @@ export default function Revision() {
           <button
             className="btn btn-primary btn-sm revision-save-btn"
             onClick={saveReview}
-            disabled={saving}
+            disabled={saving || !hasPermission('edit')}
             style={{
               background: 'var(--green)', borderColor: 'var(--green)',
               fontSize: 13, padding: '8px 20px', fontWeight: 700,
@@ -1094,8 +1155,9 @@ export default function Revision() {
 
       {/* Leyenda BV */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
-        {Object.entries(BV_UNITS).map(([bvId, units]) => {
+        {Object.entries(BV_UNITS).map(([bvId]) => {
           const c = BV_COLORS[parseInt(bvId)]
+          const activeUnits = getActiveUnitsForBv(Number(bvId), configs)
           return (
             <div key={bvId} style={{
               display: 'flex', alignItems: 'center', gap: 6,
@@ -1104,7 +1166,11 @@ export default function Revision() {
             }}>
               <span style={{ fontFamily: 'Barlow Condensed', fontWeight: 800, fontSize: 13, color: c.text }}>BV{bvId}</span>
               <span style={{ color: 'var(--mid)' }}>→</span>
-              <span style={{ color: 'var(--light)' }}>U{units.map(u => String(u).padStart(2,'0')).join(', U')}</span>
+              <span style={{ color: 'var(--light)' }}>
+                {activeUnits.length
+                  ? 'U' + activeUnits.map(u => String(u).padStart(2, '0')).join(', U')
+                  : 'Sin unidades activas'}
+              </span>
             </div>
           )
         })}
@@ -1114,6 +1180,7 @@ export default function Revision() {
         <TodayPanel
           date={today}
           reportIndex={reportIndex}
+          configs={configs}
           onStart={startReview}
           onHistory={(date, bvId) => setHistoryModal({ date, bomberoId: bvId })}
         />
@@ -1141,6 +1208,7 @@ export default function Revision() {
                 <DayCell key={date} day={day} date={date} isToday={isToday} isFuture={isFuture}
                   isPast={isPast}
                   isWeekend={col >= 5} reportIndex={reportIndex}
+                  configs={configs}
                   onStart={startReview}
                   onHistory={(date, bvId) => setHistoryModal({ date, bomberoId: bvId })}
                 />
@@ -1176,7 +1244,7 @@ export default function Revision() {
   )
 }
 
-function TodayPanel({ date, reportIndex, onStart, onHistory }) {
+function TodayPanel({ date, reportIndex, configs, onStart, onHistory }) {
   const todayLabel = new Date(date + 'T12:00:00').toLocaleDateString('es-ES', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
   })
@@ -1191,12 +1259,15 @@ function TodayPanel({ date, reportIndex, onStart, onHistory }) {
       </div>
 
       <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))' }}>
-        {Object.entries(BV_UNITS).map(([bvId, units]) => {
-          const bv   = parseInt(bvId)
+        {Object.entries(BV_UNITS).map(([bvId]) => {
+          const bv = parseInt(bvId)
+          const activeUnits = getActiveUnitsForBv(bv, configs)
           const key  = `${date}-${bv}`
           const reps = reportIndex[key] || []
-          const effectiveReps = reps.filter(r => r.reviewed_by !== 'unidades')
-          const done = effectiveReps.length >= units.length
+          const effectiveReps = reps
+            .filter(r => r.reviewed_by !== 'unidades')
+            .filter(r => activeUnits.includes(Number(r.unit_id)))
+          const done = activeUnits.length > 0 && effectiveReps.length >= activeUnits.length
           const hasIncident = effectiveReps.some(r => !r.is_ok)
           const partial = effectiveReps.length > 0 && !done
           const c = BV_COLORS[bv]
@@ -1213,9 +1284,11 @@ function TodayPanel({ date, reportIndex, onStart, onHistory }) {
                 display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s',
               }}
             >
-              <span>{done ? (hasIncident ? '⚠' : '✔') : partial ? '◑' : '○'}</span>
+              <span>{activeUnits.length === 0 ? '⏸' : done ? (hasIncident ? '⚠' : '✔') : partial ? '◑' : '○'}</span>
               <span style={{ flex: 1 }}>BV{bv}</span>
-              {partial && <span style={{ opacity: 0.65 }}>({effectiveReps.length}/{units.length})</span>}
+              {activeUnits.length === 0
+                ? <span style={{ opacity: 0.6 }}>(sin unidades)</span>
+                : partial && <span style={{ opacity: 0.65 }}>({effectiveReps.length}/{activeUnits.length})</span>}
             </button>
           )
         })}
@@ -1289,7 +1362,7 @@ function IncidentPanel({ incidents, zones, onAdd, onRemove }) {
 }
 
 // ── Celda del calendario ──────────────────────────────────
-function DayCell({ day, date, isToday, isFuture, isPast, isWeekend, reportIndex, onStart, onHistory }) {
+function DayCell({ day, date, isToday, isFuture, isPast, isWeekend, reportIndex, configs, onStart, onHistory }) {
   const locked = !isToday
   return (
     <div className="calendar-day-cell" style={{
@@ -1304,12 +1377,15 @@ function DayCell({ day, date, isToday, isFuture, isPast, isWeekend, reportIndex,
           : day}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {Object.entries(BV_UNITS).map(([bvId, units]) => {
-          const bv   = parseInt(bvId)
+        {Object.entries(BV_UNITS).map(([bvId]) => {
+          const bv = parseInt(bvId)
+          const activeUnits = getActiveUnitsForBv(bv, configs)
           const key  = `${date}-${bv}`
           const reps = reportIndex[key] || []
-          const effectiveReps = reps.filter(r => r.reviewed_by !== 'unidades')
-          const done = effectiveReps.length >= units.length
+          const effectiveReps = reps
+            .filter(r => r.reviewed_by !== 'unidades')
+            .filter(r => activeUnits.includes(Number(r.unit_id)))
+          const done = activeUnits.length > 0 && effectiveReps.length >= activeUnits.length
           const hasIncident = effectiveReps.some(r => !r.is_ok)
           const partial = effectiveReps.length > 0 && !done
           const c = BV_COLORS[bv]
@@ -1344,9 +1420,11 @@ function DayCell({ day, date, isToday, isFuture, isPast, isWeekend, reportIndex,
                 display: 'flex', alignItems: 'center', gap: 3,
               }}
             >
-              <span>{locked ? '🚫' : done ? (hasIncident ? '⚠' : '✔') : partial ? '◑' : '○'}</span>
+              <span>{locked ? '🚫' : activeUnits.length === 0 ? '⏸' : done ? (hasIncident ? '⚠' : '✔') : partial ? '◑' : '○'}</span>
               <span>BV{bv}</span>
-              {partial && <span style={{ opacity: 0.6 }}>({effectiveReps.length}/{units.length})</span>}
+              {activeUnits.length === 0
+                ? <span style={{ opacity: 0.6 }}>(0)</span>
+                : partial && <span style={{ opacity: 0.6 }}>({effectiveReps.length}/{activeUnits.length})</span>}
             </button>
           )
         })}

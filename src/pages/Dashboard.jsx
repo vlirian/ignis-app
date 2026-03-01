@@ -1,24 +1,30 @@
 import { useApp } from '../lib/AppContext'
-import { UNIT_IDS, buildZones, unitAlertLevel, unitSummary, zoneStatus } from '../data/units'
+import { buildZones, unitAlertLevel, unitSummary } from '../data/units'
 import { useNavigate } from 'react-router-dom'
 
 export default function Dashboard() {
   const { configs, items, revisionIncidents } = useApp()
   const navigate = useNavigate()
+  const activeUnitIds = Object.keys(configs || {})
+    .map(Number)
+    .filter(Number.isFinite)
+    .filter(id => configs[id]?.isActive !== false)
+    .sort((a, b) => a - b)
 
   // Calcula estadísticas globales
   let globalTotal = 0, globalMissing = 0, globalLow = 0
   const unitsWithAlerts = []
 
-  UNIT_IDS.forEach(id => {
+  activeUnitIds.forEach(id => {
     const cfg = configs[id]
+    if (!cfg) return
     const zones = buildZones(cfg.numCofres, cfg.hasTecho, cfg.hasTrasera)
-    const s = unitSummary(items[id], zones)
+    const s = unitSummary(items[id] || {}, zones)
     globalTotal += s.total
     globalMissing += s.missing
     globalLow += s.low
     if (s.missing > 0 || s.low > 0) {
-      unitsWithAlerts.push({ id, ...s, level: unitAlertLevel(items[id], zones) })
+      unitsWithAlerts.push({ id, ...s, level: unitAlertLevel(items[id] || {}, zones) })
     }
   })
 
@@ -97,11 +103,12 @@ export default function Dashboard() {
             </tr>
           </thead>
           <tbody>
-            {UNIT_IDS.map(id => {
+            {activeUnitIds.map(id => {
               const cfg = configs[id]
+              if (!cfg) return null
               const zones = buildZones(cfg.numCofres, cfg.hasTecho, cfg.hasTrasera)
-              const s = unitSummary(items[id], zones)
-              const level = unitAlertLevel(items[id], zones)
+              const s = unitSummary(items[id] || {}, zones)
+              const level = unitAlertLevel(items[id] || {}, zones)
               const hasIncident = level !== 'ok' || unitsWithRevisionIncidents.has(id)
               return (
                 <tr key={id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/unidades/${id}`)}>
