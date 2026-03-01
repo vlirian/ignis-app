@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useLocation, unstable_useBlocker as useBlocker } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { useApp } from '../lib/AppContext'
 import { buildZones } from '../data/units'
 import { supabase } from '../lib/supabase'
@@ -231,15 +231,6 @@ export default function Revision() {
   const currentDraftSignature = (view === 'review' && reviewState) ? buildDraftSignature(reviewState) : ''
   const hasUnsavedChanges = view === 'review' && !!reviewState && currentDraftSignature !== savedDraftSignature
 
-  const blocker = useBlocker(hasUnsavedChanges)
-
-  useEffect(() => {
-    if (blocker.state !== 'blocked') return
-    const leave = window.confirm('Tienes cambios sin guardar progreso. ¿Quieres salir sin guardar?')
-    if (leave) blocker.proceed()
-    else blocker.reset()
-  }, [blocker])
-
   useEffect(() => {
     if (!hasUnsavedChanges) return
     const handler = (e) => {
@@ -248,6 +239,43 @@ export default function Revision() {
     }
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
+  }, [hasUnsavedChanges])
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return
+    const onCaptureClick = (e) => {
+      const anchor = e.target?.closest?.('a[href]')
+      if (!anchor) return
+      const rawHref = anchor.getAttribute('href') || ''
+      if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) return
+      let url
+      try {
+        url = new URL(anchor.href, window.location.origin)
+      } catch {
+        return
+      }
+      if (url.origin !== window.location.origin) return
+      const current = `${window.location.pathname}${window.location.search}${window.location.hash}`
+      const next = `${url.pathname}${url.search}${url.hash}`
+      if (current === next) return
+      const leave = window.confirm('Tienes cambios sin guardar progreso. ¿Quieres salir sin guardar?')
+      if (!leave) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }
+    document.addEventListener('click', onCaptureClick, true)
+    return () => document.removeEventListener('click', onCaptureClick, true)
+  }, [hasUnsavedChanges])
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return
+    const onPopState = () => {
+      const leave = window.confirm('Tienes cambios sin guardar progreso. ¿Quieres salir sin guardar?')
+      if (!leave) window.history.go(1)
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
   }, [hasUnsavedChanges])
 
   async function loadReports() {
@@ -793,8 +821,14 @@ export default function Revision() {
                   className="btn btn-ghost btn-sm"
                   onClick={() => saveDraftSnapshot(reviewState, false, true)}
                   disabled={!hasPermission('edit')}
+                  style={hasUnsavedChanges ? {
+                    background: 'rgba(241,196,15,0.18)',
+                    borderColor: 'var(--yellow)',
+                    color: 'var(--yellow-l)',
+                    boxShadow: '0 0 0 1px rgba(241,196,15,0.3), 0 0 14px rgba(241,196,15,0.18)',
+                  } : undefined}
                 >
-                  💾 Guardar progreso
+                  {hasUnsavedChanges ? '💾 Guardar progreso *' : '💾 Guardar progreso'}
                 </button>
                 <button
                   className="btn btn-primary btn-sm"
@@ -936,8 +970,14 @@ export default function Revision() {
               className="btn btn-ghost btn-sm"
               onClick={() => saveDraftSnapshot(reviewState, false, true)}
               disabled={!hasPermission('edit')}
+              style={hasUnsavedChanges ? {
+                background: 'rgba(241,196,15,0.18)',
+                borderColor: 'var(--yellow)',
+                color: 'var(--yellow-l)',
+                boxShadow: '0 0 0 1px rgba(241,196,15,0.3), 0 0 14px rgba(241,196,15,0.18)',
+              } : undefined}
             >
-              💾 Guardar progreso
+              {hasUnsavedChanges ? '💾 Guardar progreso *' : '💾 Guardar progreso'}
             </button>
             <button
               className="btn btn-primary btn-sm revision-save-btn"
