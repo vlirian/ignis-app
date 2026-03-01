@@ -31,11 +31,21 @@ export default function Dashboard() {
   const unitsWithRevisionIncidents = new Set(
     (revisionIncidents || []).map(inc => Number(inc.unitId)).filter(Number.isFinite)
   )
+  const incidentsByUnit = {}
+  ;(revisionIncidents || []).forEach((inc) => {
+    const unitId = Number(inc.unitId)
+    if (!Number.isFinite(unitId)) return
+    if (configs[unitId]?.isActive === false) return
+    if (!incidentsByUnit[unitId]) incidentsByUnit[unitId] = new Set()
+    const key = `${String(inc.zone || '').trim().toLowerCase()}|${String(inc.item || '').trim().toLowerCase()}`
+    incidentsByUnit[unitId].add(key)
+  })
+  const globalIncidents = Object.values(incidentsByUnit).reduce((acc, set) => acc + set.size, 0)
 
   const kpis = [
     { label: 'Total artículos',   value: globalTotal,   color: 'var(--blue-l)',   top: 'info',  icon: '📦' },
     { label: 'Completos',         value: globalTotal - globalMissing - globalLow, color: 'var(--green-l)', top: 'ok', icon: '✅' },
-    { label: 'Stock bajo',        value: globalLow,     color: 'var(--yellow-l)', top: 'warn',  icon: '⚠️' },
+    { label: 'Incidencias',       value: globalIncidents, color: 'var(--yellow-l)', top: 'warn', icon: '⚠️' },
     { label: 'Artículos faltantes', value: globalMissing, color: 'var(--red-l)', top: 'alert', icon: '🚨' },
   ]
 
@@ -98,7 +108,7 @@ export default function Dashboard() {
               <th>Zonas</th>
               <th>Artículos</th>
               <th>Faltantes</th>
-              <th>Stock bajo</th>
+              <th>Incidencias</th>
               <th>Estado</th>
             </tr>
           </thead>
@@ -121,7 +131,9 @@ export default function Dashboard() {
                   <td>{s.zones}</td>
                   <td>{s.total}</td>
                   <td style={{ color: s.missing > 0 ? 'var(--red-l)' : 'var(--mid)' }}>{s.missing}</td>
-                  <td style={{ color: s.low > 0 ? 'var(--yellow-l)' : 'var(--mid)' }}>{s.low}</td>
+                  <td style={{ color: (incidentsByUnit[id]?.size || 0) > 0 ? 'var(--yellow-l)' : 'var(--mid)' }}>
+                    {incidentsByUnit[id]?.size || 0}
+                  </td>
                   <td>
                     <span className={`chip chip-${level === 'ok' ? 'ok' : level === 'warn' ? 'warn' : 'alert'}`}>
                       {level === 'ok' ? '✓ Completa' : level === 'warn' ? 'Stock bajo' : 'Faltante'}
