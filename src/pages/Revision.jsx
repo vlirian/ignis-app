@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, unstable_useBlocker as useBlocker } from 'react-router-dom'
 import { useApp } from '../lib/AppContext'
 import { buildZones } from '../data/units'
 import { supabase } from '../lib/supabase'
@@ -151,7 +151,8 @@ function composeNotesWithPhotoUrls(notes = '', photoUrls = []) {
 // ── VISTA PRINCIPAL ───────────────────────────────────────
 export default function Revision() {
   const location = useLocation()
-  const { configs, items, session, revisionIncidents, refreshRevisionIncidents, showToast, hasPermission, bvUnits } = useApp()
+  const { configs, items, session, revisionIncidents, refreshRevisionIncidents, showToast, hasPermission, bvUnits: assignedBvUnits } = useApp()
+  const effectiveBvUnits = assignedBvUnits || DEFAULT_BV_UNITS
   const now = new Date()
   const lastAutoOpenNonce = useRef(null)
 
@@ -170,20 +171,33 @@ export default function Revision() {
   const [issueNoteDraft, setIssueNoteDraft] = useState('')
   const [issueNoteType, setIssueNoteType] = useState('incident') // incident | missing
   const [issueNoteFiles, setIssueNoteFiles] = useState([])
+  const [savedDraftSignature, setSavedDraftSignature] = useState('')
 
   useEffect(() => { loadReports() }, [viewYear, viewMonth])
 
-  function saveDraftSnapshot(state, silent = true) {
+  function buildDraftSignature(state) {
+    try {
+      if (!state) return ''
+      return JSON.stringify(serializeReviewDraft(state))
+    } catch {
+      return ''
+    }
+  }
+
+  function saveDraftSnapshot(state, silent = true, markAsSaved = false) {
     try {
       if (!state || typeof window === 'undefined') return
       const email = session?.user?.email || 'anon'
       const key = getDraftStorageKey(state.date, state.bomberoId, email)
       const payload = { ...serializeReviewDraft(state), savedAt: new Date().toISOString() }
       window.localStorage.setItem(key, JSON.stringify(payload))
+      if (markAsSaved) setSavedDraftSignature(buildDraftSignature(state))
       if (!silent) showToast('Progreso guardado', 'ok')
+      return true
     } catch (e) {
       console.warn('No se pudo guardar borrador de revisión:', e)
       if (!silent) showToast('No se pudo guardar el progreso', 'error')
+      return false
     }
   }
 
@@ -214,11 +228,27 @@ export default function Revision() {
     }
   }
 
+  const currentDraftSignature = (view === 'review' && reviewState) ? buildDraftSignature(reviewState) : ''
+  const hasUnsavedChanges = view === 'review' && !!reviewState && currentDraftSignature !== savedDraftSignature
+
+  const blocker = useBlocker(hasUnsavedChanges)
+
   useEffect(() => {
-    if (view !== 'review' || !reviewState) return
-    const t = setTimeout(() => saveDraftSnapshot(reviewState, true), 600)
-    return () => clearTimeout(t)
-  }, [view, reviewState, session?.user?.email])
+    if (blocker.state !== 'blocked') return
+    const leave = window.confirm('Tienes cambios sin guardar progreso. ¿Quieres salir sin guardar?')
+    if (leave) blocker.proceed()
+    else blocker.reset()
+  }, [blocker])
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return
+    const handler = (e) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [hasUnsavedChanges])
 
   async function loadReports() {
     setLoadingReports(true)
@@ -241,7 +271,7 @@ export default function Revision() {
 
   // Iniciar revisión — crea estructura con todos los artículos de todas las unidades
   function startReview(date, bomberoId, preferredUnitId = null) {
-    const unitIds = getActiveUnitsForBv(bomberoId, configs, bvUnits)
+    const unitIds = getActiveUnitsForBv(bomberoId, configs, effectiveBvUnits)
     if (unitIds.length === 0) {
       showToast('Este bombero no tiene unidades activas asignadas', 'warn')
       return
@@ -331,7 +361,9 @@ export default function Revision() {
     const activeUnitIdx = (draftActiveIdx >= 0 && draftActiveIdx < hydratedUnits.length)
       ? draftActiveIdx
       : (preferredIdx >= 0 ? preferredIdx : null)
-    setReviewState({ date, bomberoId, activeUnitIdx, units: hydratedUnits })
+    const nextState = { date, bomberoId, activeUnitIdx, units: hydratedUnits }
+    setReviewState(nextState)
+    setSavedDraftSignature(buildDraftSignature(nextState))
     if (draft) showToast('Progreso recuperado', 'ok')
     setView('review')
   }
@@ -345,8 +377,8 @@ export default function Revision() {
     if (!Number.isFinite(targetUnitId)) return
 
     let targetBv = null
-    for (const [bvId] of Object.entries(bvUnits || DEFAULT_BV_UNITS)) {
-      const activeUnits = getActiveUnitsForBv(Number(bvId), configs, bvUnits || DEFAULT_BV_UNITS)
+    for (const [bvId] of Object.entries(effectiveBvUnits)) {
+      const activeUnits = getActiveUnitsForBv(Number(bvId), configs, effectiveBvUnits)
       if ((activeUnits || []).includes(targetUnitId)) {
         targetBv = Number(bvId)
         break
@@ -506,7 +538,7 @@ export default function Revision() {
       reportDate: date,
       configs,
       actorEmail: email,
-      bvUnits: bvUnits || DEFAULT_BV_UNITS,
+      bvUnits: effectiveBvUnits,
       force: false,
     })
     if (!dailyRes?.ok) {
@@ -522,6 +554,7 @@ export default function Revision() {
     }
 
     clearDraftSnapshot(date, bomberoId)
+    setSavedDraftSignature('')
     setSaving(false)
     setView('calendar')
     setReviewState(null)
@@ -730,13 +763,23 @@ export default function Revision() {
       setReviewState(prev => ({ ...prev, activeUnitIdx: idx }))
     }
 
+    function exitReviewToCalendar() {
+      if (hasUnsavedChanges) {
+        const leave = window.confirm('Tienes cambios sin guardar progreso. ¿Quieres salir sin guardar?')
+        if (!leave) return
+      }
+      setView('calendar')
+      setReviewState(null)
+      setSavedDraftSignature('')
+    }
+
     if (!Number.isInteger(activeUnitIdx)) {
       return (
         <div className="animate-in page-container">
           <div className="card" style={{ padding: 18, borderTop: `3px solid ${c.border}` }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <button className="btn btn-ghost btn-sm" onClick={() => { setView('calendar'); setReviewState(null) }}>‹ Volver</button>
+                <button className="btn btn-ghost btn-sm" onClick={exitReviewToCalendar}>‹ Volver</button>
                 <div style={{ fontFamily: 'Barlow Condensed', fontSize: 18, fontWeight: 800, color: c.text, background: c.bg, border: `1px solid ${c.border}`, borderRadius: 8, padding: '4px 12px', letterSpacing: 1 }}>BV{bomberoId}</div>
                 <div>
                   <div style={{ fontFamily: 'Barlow Condensed', fontSize: 24, fontWeight: 800, letterSpacing: 0.8 }}>
@@ -748,7 +791,7 @@ export default function Revision() {
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button
                   className="btn btn-ghost btn-sm"
-                  onClick={() => saveDraftSnapshot(reviewState, false)}
+                  onClick={() => saveDraftSnapshot(reviewState, false, true)}
                   disabled={!hasPermission('edit')}
                 >
                   💾 Guardar progreso
@@ -836,7 +879,7 @@ export default function Revision() {
           <div className="revision-topbar-main" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <button
               className="btn btn-ghost btn-sm"
-              onClick={() => { setView('calendar'); setReviewState(null) }}
+              onClick={exitReviewToCalendar}
             >‹ Volver</button>
             <div style={{
               fontFamily: 'Barlow Condensed', fontSize: 18, fontWeight: 800,
@@ -891,7 +934,7 @@ export default function Revision() {
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <button
               className="btn btn-ghost btn-sm"
-              onClick={() => saveDraftSnapshot(reviewState, false)}
+              onClick={() => saveDraftSnapshot(reviewState, false, true)}
               disabled={!hasPermission('edit')}
             >
               💾 Guardar progreso
@@ -1380,9 +1423,9 @@ export default function Revision() {
 
       {/* Leyenda BV */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
-        {Object.entries(bvUnits || DEFAULT_BV_UNITS).map(([bvId]) => {
+        {Object.entries(effectiveBvUnits).map(([bvId]) => {
           const c = BV_COLORS[parseInt(bvId)]
-          const activeUnits = getActiveUnitsForBv(Number(bvId), configs, bvUnits || DEFAULT_BV_UNITS)
+          const activeUnits = getActiveUnitsForBv(Number(bvId), configs, effectiveBvUnits)
           return (
             <div key={bvId} style={{
               display: 'flex', alignItems: 'center', gap: 6,
@@ -1406,6 +1449,7 @@ export default function Revision() {
           date={today}
           reportIndex={reportIndex}
           configs={configs}
+          bvUnits={effectiveBvUnits}
           onStart={startReview}
           onHistory={(date, bvId) => setHistoryModal({ date, bomberoId: bvId })}
         />
@@ -1434,6 +1478,7 @@ export default function Revision() {
                   isPast={isPast}
                   isWeekend={col >= 5} reportIndex={reportIndex}
                   configs={configs}
+                  bvUnits={effectiveBvUnits}
                   onStart={startReview}
                   onHistory={(date, bvId) => setHistoryModal({ date, bomberoId: bvId })}
                 />
@@ -1469,7 +1514,7 @@ export default function Revision() {
   )
 }
 
-function TodayPanel({ date, reportIndex, configs, onStart, onHistory }) {
+function TodayPanel({ date, reportIndex, configs, bvUnits = DEFAULT_BV_UNITS, onStart, onHistory }) {
   const todayLabel = new Date(date + 'T12:00:00').toLocaleDateString('es-ES', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
   })
@@ -1484,9 +1529,9 @@ function TodayPanel({ date, reportIndex, configs, onStart, onHistory }) {
       </div>
 
       <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))' }}>
-        {Object.entries(bvUnits || DEFAULT_BV_UNITS).map(([bvId]) => {
+        {Object.entries(bvUnits).map(([bvId]) => {
           const bv = parseInt(bvId)
-          const activeUnits = getActiveUnitsForBv(bv, configs, bvUnits || DEFAULT_BV_UNITS)
+          const activeUnits = getActiveUnitsForBv(bv, configs, bvUnits)
           const key  = `${date}-${bv}`
           const reps = reportIndex[key] || []
           const effectiveReps = reps
@@ -1587,7 +1632,7 @@ function IncidentPanel({ incidents, zones, onAdd, onRemove }) {
 }
 
 // ── Celda del calendario ──────────────────────────────────
-function DayCell({ day, date, isToday, isFuture, isPast, isWeekend, reportIndex, configs, onStart, onHistory }) {
+function DayCell({ day, date, isToday, isFuture, isPast, isWeekend, reportIndex, configs, bvUnits = DEFAULT_BV_UNITS, onStart, onHistory }) {
   const locked = !isToday
   return (
     <div className="calendar-day-cell" style={{
@@ -1602,9 +1647,9 @@ function DayCell({ day, date, isToday, isFuture, isPast, isWeekend, reportIndex,
           : day}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {Object.entries(bvUnits || DEFAULT_BV_UNITS).map(([bvId]) => {
+        {Object.entries(bvUnits).map(([bvId]) => {
           const bv = parseInt(bvId)
-          const activeUnits = getActiveUnitsForBv(bv, configs, bvUnits || DEFAULT_BV_UNITS)
+          const activeUnits = getActiveUnitsForBv(bv, configs, bvUnits)
           const key  = `${date}-${bv}`
           const reps = reportIndex[key] || []
           const effectiveReps = reps
