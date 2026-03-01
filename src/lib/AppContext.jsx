@@ -259,16 +259,21 @@ export function AppProvider({ children }) {
         })
       })
 
-      const assignmentMap = { ...DEFAULT_BV_UNITS }
+      const assignmentMap = {}
+      Object.entries(DEFAULT_BV_UNITS).forEach(([bv, units]) => {
+        assignmentMap[bv] = [...units]
+      })
       const { data: assignmentRows, error: assignmentErr } = await supabase
         .from('bv_unit_assignments')
         .select('unit_id,bombero_id')
-      if (!assignmentErr && Array.isArray(assignmentRows)) {
-        Object.keys(assignmentMap).forEach((k) => { assignmentMap[k] = [] })
+      if (!assignmentErr && Array.isArray(assignmentRows) && assignmentRows.length > 0) {
         assignmentRows.forEach((row) => {
           const unitId = Number(row.unit_id)
           const bvId = Number(row.bombero_id)
           if (!Number.isFinite(unitId) || !Number.isFinite(bvId)) return
+          Object.keys(assignmentMap).forEach((k) => {
+            assignmentMap[k] = (assignmentMap[k] || []).filter(u => Number(u) !== unitId)
+          })
           if (!assignmentMap[bvId]) assignmentMap[bvId] = []
           if (!assignmentMap[bvId].includes(unitId)) assignmentMap[bvId].push(unitId)
         })
