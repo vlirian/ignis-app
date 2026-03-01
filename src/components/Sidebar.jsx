@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom'
 import { useApp } from '../lib/AppContext'
 import { supabase } from '../lib/supabase'
 import { buildZones, unitAlertLevel } from '../data/units'
+import BrandLogo from './BrandLogo'
 import styles from './Sidebar.module.css'
 
 const DEFAULT_BV_UNITS = {
@@ -38,9 +39,13 @@ function getActiveUnitsForBv(bvId, configs, bvUnits = DEFAULT_BV_UNITS) {
   return (bvUnits[bvId] || []).filter(unitId => configs?.[unitId]?.isActive !== false)
 }
 
+function isDraftReviewedBy(reviewedBy = '') {
+  return String(reviewedBy || '').toLowerCase().startsWith('borrador:')
+}
+
 export default function Sidebar({ open, onClose }) {
-  const { configs, items, isAdmin, revisionIncidents, bvUnits } = useApp()
-  const effectiveBvUnits = bvUnits || DEFAULT_BV_UNITS
+  const { configs, items, isAdmin, revisionIncidents, bvUnits: assignedBvUnits } = useApp()
+  const effectiveBvUnits = assignedBvUnits || DEFAULT_BV_UNITS
   const navItems = NAV.filter(item => !item.adminOnly || isAdmin)
   const [revisionPending, setRevisionPending] = useState(false)
 
@@ -104,7 +109,7 @@ export default function Sidebar({ open, onClose }) {
           const doneUnits = new Set(
             (data || [])
               .filter(r => Number(r.bombero_id) === bvId)
-              .filter(r => r.reviewed_by !== 'unidades')
+              .filter(r => r.reviewed_by !== 'unidades' && !isDraftReviewedBy(r.reviewed_by))
               .map(r => Number(r.unit_id))
           )
 
@@ -138,8 +143,12 @@ export default function Sidebar({ open, onClose }) {
       {open && <div className={styles.backdrop} onClick={onClose} />}
       <aside className={`${styles.sidebar} ${open ? styles.open : ''}`}>
         <div className={styles.logo}>
-          <div className={styles.logoTitle}>🔥 IGNIS</div>
-          <div className={styles.logoSub}>Gestión de Material · v1.0</div>
+          <BrandLogo
+            size="sm"
+            title="IGNIS"
+            subtitle="Gestión de Material"
+            version="v1.0"
+          />
         </div>
 
         <nav className={styles.nav}>

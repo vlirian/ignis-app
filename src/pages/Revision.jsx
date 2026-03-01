@@ -29,9 +29,14 @@ const PHOTO_NOTES_MARKER = '[[FOTOS_REVISION]]'
 const MISSING_NOTE = 'Marcado por bombero: NO está'
 const INCIDENT_NOTE = 'Marcado por bombero: PRESENTA incidencia'
 const REVISION_DRAFT_PREFIX = 'ignis:revision-draft:'
+const DRAFT_REVIEWED_BY_PREFIX = 'borrador:'
 
 function getDraftStorageKey(date, bomberoId, email) {
   return `${REVISION_DRAFT_PREFIX}${date}:${bomberoId}:${String(email || 'anon').toLowerCase()}`
+}
+
+function isDraftReviewedBy(reviewedBy = '') {
+  return String(reviewedBy || '').toLowerCase().startsWith(DRAFT_REVIEWED_BY_PREFIX)
 }
 
 function serializeReviewDraft(state) {
@@ -151,7 +156,7 @@ function composeNotesWithPhotoUrls(notes = '', photoUrls = []) {
 // ── VISTA PRINCIPAL ───────────────────────────────────────
 export default function Revision() {
   const location = useLocation()
-  const { configs, items, session, revisionIncidents, refreshRevisionIncidents, showToast, hasPermission, bvUnits: assignedBvUnits } = useApp()
+  const { configs, items, session, revisionIncidents, refreshRevisionIncidents, refreshInventory, showToast, hasPermission, bvUnits: assignedBvUnits } = useApp()
   const effectiveBvUnits = assignedBvUnits || DEFAULT_BV_UNITS
   const now = new Date()
   const lastAutoOpenNonce = useRef(null)
@@ -305,7 +310,7 @@ export default function Revision() {
       return
     }
     const alreadyDone = (reportIndex[`${date}-${bomberoId}`] || [])
-      .filter(r => r.reviewed_by !== 'unidades')
+      .filter(r => r.reviewed_by !== 'unidades' && !isDraftReviewedBy(r.reviewed_by))
       .map(r => r.unit_id)
     const pendingIds = unitIds.filter(u => !alreadyDone.includes(u))
 
@@ -417,6 +422,144 @@ export default function Revision() {
     lastAutoOpenNonce.current = nonce
     startReview(todayStr(), targetBv, targetUnitId)
   }, [location.state, reports, configs, items])
+
+  async function saveProgress() {
+    if (!hasPermission('edit')) {
+      showToast('Modo solo lectura: no puedes guardar progreso', 'warn')
+      return
+    }
+    if (!reviewState) return
+
+    setSaving(true)
+    const { date, bomberoId, units } = reviewState
+    const email = String(session?.user?.email || 'desconocido').toLowerCase()
+    const draftReviewedBy = `${DRAFT_REVIEWED_BY_PREFIX}${email}`
+    const touchedUnits = new Set()
+
+    const { data: existingDraftRows, error: existingDraftErr } = await supabase
+      .from('revision_reports')
+      .select('id,unit_id')
+      .eq('report_date', date)
+      .eq('bombero_id', bomberoId)
+      .eq('reviewed_by', draftReviewedBy)
+    if (existingDraftErr) {
+      setSaving(false)
+      showToast(`No se pudo guardar progreso: ${existingDraftErr.message || 'error'}`, 'error')
+      return
+    }
+
+    for (const unit of units) {
+      const cfg = configs[unit.unitId]
+      const zones = cfg ? buildZones(cfg.numCofres, cfg.hasTecho, cfg.hasTrasera) : []
+      const qtyOverrides = unit.qtyOverrides || {}
+
+      const hasAnyCheck = Object.values(unit.itemChecks || {}).some(v => v === 'ok' || v === 'issue')
+      const hasAnyIncident = (unit.incidents || []).length > 0
+      const hasAnyQtyOverride = Object.keys(qtyOverrides).length > 0
+      const hasNotes = String(unit.notes || '').trim().length > 0
+      const hasPhotos = (unit.attachments || []).some(a => String(a?.url || '').startsWith('http'))
+      const hasProgress = hasAnyCheck || hasAnyIncident || hasAnyQtyOverride || hasNotes || hasPhotos
+      if (!hasProgress) continue
+
+      touchedUnits.add(Number(unit.unitId))
+
+      const resolveItemMeta = (id) => {
+        for (const z of zones) {
+          const found = (items[unit.unitId]?.[z.id] || []).find(i => String(i.id) === String(id))
+          if (found) {
+            const effQty = Object.prototype.hasOwnProperty.call(qtyOverrides, id) ? Number(qtyOverrides[id]) : Number(found.qty)
+            return { itemId: id, name: found.name, zone: z.label, isMissing: effQty === 0, qty: effQty }
+          }
+        }
+        return { itemId: id, name: id, zone: '', isMissing: false }
+      }
+
+      const issueChecked = Object.entries(unit.itemChecks || {})
+        .filter(([, v]) => v === 'issue')
+        .map(([id]) => resolveItemMeta(id))
+
+      const existingIssueIds = new Set(
+        (unit.incidents || [])
+          .map(inc => inc?._itemId)
+          .filter(Boolean)
+          .map(String)
+      )
+
+      const checkedIssueIncidents = issueChecked
+        .filter(u => !existingIssueIds.has(String(u.itemId)))
+        .map(u => ({
+          itemId: u.itemId,
+          zone: u.zone,
+          item: u.name,
+          note: u.isMissing
+            ? 'Marcado por bombero: FALTA de material'
+            : 'Marcado por bombero: INCIDENCIA de material',
+          source: 'revision',
+        }))
+
+      const incidents = [
+        ...(unit.incidents || []).map(({ _itemId, ...rest }) => rest),
+        ...checkedIssueIncidents,
+      ]
+
+      for (const [itemId, nextQty] of Object.entries(qtyOverrides || {})) {
+        const { error: qtyErr } = await supabase
+          .from('unit_items')
+          .update({ qty: Number(nextQty) || 0 })
+          .eq('id', itemId)
+        if (qtyErr) {
+          setSaving(false)
+          showToast(`No se pudo guardar cantidad del artículo ${itemId}: ${qtyErr.message || 'error'}`, 'error')
+          return
+        }
+      }
+
+      const existingUrls = (unit.attachments || [])
+        .map(a => a?.url)
+        .filter(url => url && !String(url).startsWith('blob:'))
+      const generalNotes = composeNotesWithPhotoUrls(unit.notes, existingUrls)
+
+      const allChecked = Object.values(unit.itemChecks || {}).every(v => v === 'ok' || v === 'issue')
+      const hasIncidents = incidents.length > 0
+      const isOk = allChecked && !hasIncidents
+
+      const { error: upsertErr } = await supabase.from('revision_reports').upsert({
+        report_date: date,
+        bombero_id: bomberoId,
+        unit_id: unit.unitId,
+        is_ok: isOk,
+        incidents,
+        general_notes: generalNotes,
+        reviewed_by: draftReviewedBy,
+      }, { onConflict: 'report_date,bombero_id,unit_id' })
+      if (upsertErr) {
+        setSaving(false)
+        showToast(`No se pudo guardar progreso en unidad ${unit.unitId}: ${upsertErr.message || 'error'}`, 'error')
+        return
+      }
+    }
+
+    const draftRows = existingDraftRows || []
+    const staleIds = draftRows
+      .filter(r => !touchedUnits.has(Number(r.unit_id)))
+      .map(r => r.id)
+      .filter(Boolean)
+    if (staleIds.length > 0) {
+      const { error: delErr } = await supabase.from('revision_reports').delete().in('id', staleIds)
+      if (delErr) {
+        setSaving(false)
+        showToast(`Progreso parcial guardado, pero no se limpiaron borradores antiguos: ${delErr.message || 'error'}`, 'warn')
+        return
+      }
+    }
+
+    saveDraftSnapshot(reviewState, true, true)
+    setSaving(false)
+    await loadReports()
+    await refreshInventory()
+    await refreshRevisionIncidents()
+    showToast('Progreso guardado y sincronizado', 'ok')
+  }
 
   // Guardar toda la revisión en Supabase
   async function saveReview() {
@@ -530,7 +673,15 @@ export default function Revision() {
       const generalNotes = composeNotesWithPhotoUrls(unit.notes, [...existingUrls, ...uploadedUrls])
 
       for (const [itemId, nextQty] of Object.entries(qtyOverrides || {})) {
-        await supabase.from('unit_items').update({ qty: Number(nextQty) || 0 }).eq('id', itemId)
+        const { error: qtyErr } = await supabase
+          .from('unit_items')
+          .update({ qty: Number(nextQty) || 0 })
+          .eq('id', itemId)
+        if (qtyErr) {
+          setSaving(false)
+          showToast(`No se pudo guardar cantidad del artículo ${itemId}: ${qtyErr.message || 'error'}`, 'error')
+          return
+        }
       }
 
       await supabase.from('revision_reports').upsert({
@@ -587,7 +738,8 @@ export default function Revision() {
     setView('calendar')
     setReviewState(null)
     loadReports()
-    refreshRevisionIncidents()
+    await refreshInventory()
+    await refreshRevisionIncidents()
   }
 
   const monthName = new Date(viewYear, viewMonth, 1).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
@@ -819,8 +971,8 @@ export default function Revision() {
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button
                   className="btn btn-ghost btn-sm"
-                  onClick={() => saveDraftSnapshot(reviewState, false, true)}
-                  disabled={!hasPermission('edit')}
+                  onClick={saveProgress}
+                  disabled={!hasPermission('edit') || saving}
                   style={hasUnsavedChanges ? {
                     background: 'rgba(241,196,15,0.18)',
                     borderColor: 'var(--yellow)',
@@ -828,7 +980,7 @@ export default function Revision() {
                     boxShadow: '0 0 0 1px rgba(241,196,15,0.3), 0 0 14px rgba(241,196,15,0.18)',
                   } : undefined}
                 >
-                  {hasUnsavedChanges ? '💾 Guardar progreso *' : '💾 Guardar progreso'}
+                  {saving ? 'Guardando...' : hasUnsavedChanges ? '💾 Guardar progreso *' : '💾 Guardar progreso'}
                 </button>
                 <button
                   className="btn btn-primary btn-sm"
@@ -968,8 +1120,8 @@ export default function Revision() {
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <button
               className="btn btn-ghost btn-sm"
-              onClick={() => saveDraftSnapshot(reviewState, false, true)}
-              disabled={!hasPermission('edit')}
+              onClick={saveProgress}
+              disabled={!hasPermission('edit') || saving}
               style={hasUnsavedChanges ? {
                 background: 'rgba(241,196,15,0.18)',
                 borderColor: 'var(--yellow)',
@@ -977,7 +1129,7 @@ export default function Revision() {
                 boxShadow: '0 0 0 1px rgba(241,196,15,0.3), 0 0 14px rgba(241,196,15,0.18)',
               } : undefined}
             >
-              {hasUnsavedChanges ? '💾 Guardar progreso *' : '💾 Guardar progreso'}
+              {saving ? 'Guardando...' : hasUnsavedChanges ? '💾 Guardar progreso *' : '💾 Guardar progreso'}
             </button>
             <button
               className="btn btn-primary btn-sm revision-save-btn"
@@ -1575,7 +1727,7 @@ function TodayPanel({ date, reportIndex, configs, bvUnits = DEFAULT_BV_UNITS, on
           const key  = `${date}-${bv}`
           const reps = reportIndex[key] || []
           const effectiveReps = reps
-            .filter(r => r.reviewed_by !== 'unidades')
+            .filter(r => r.reviewed_by !== 'unidades' && !isDraftReviewedBy(r.reviewed_by))
             .filter(r => activeUnits.includes(Number(r.unit_id)))
           const done = activeUnits.length > 0 && effectiveReps.length >= activeUnits.length
           const hasIncident = effectiveReps.some(r => !r.is_ok)
@@ -1693,7 +1845,7 @@ function DayCell({ day, date, isToday, isFuture, isPast, isWeekend, reportIndex,
           const key  = `${date}-${bv}`
           const reps = reportIndex[key] || []
           const effectiveReps = reps
-            .filter(r => r.reviewed_by !== 'unidades')
+            .filter(r => r.reviewed_by !== 'unidades' && !isDraftReviewedBy(r.reviewed_by))
             .filter(r => activeUnits.includes(Number(r.unit_id)))
           const done = activeUnits.length > 0 && effectiveReps.length >= activeUnits.length
           const hasIncident = effectiveReps.some(r => !r.is_ok)
@@ -1746,7 +1898,7 @@ function DayCell({ day, date, isToday, isFuture, isPast, isWeekend, reportIndex,
 // ── Modal historial ───────────────────────────────────────
 function HistoryModal({ date, bomberoId, reports, onClose, onRefresh, onNotify }) {
   const c = BV_COLORS[bomberoId]
-  const visibleReports = (reports || []).filter(r => r.reviewed_by !== 'unidades')
+  const visibleReports = (reports || []).filter(r => r.reviewed_by !== 'unidades' && !isDraftReviewedBy(r.reviewed_by))
   const totalIncidents = visibleReports.reduce((acc, r) => acc + (r.incidents?.length || 0), 0)
   const allOk = visibleReports.length > 0 && visibleReports.every(r => r.is_ok)
   const dateLabel = new Date(date + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })

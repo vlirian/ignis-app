@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import BrandLogo from '../components/BrandLogo'
 
 export default function LoginPage() {
   const [email, setEmail]       = useState('')
@@ -64,15 +65,12 @@ export default function LoginPage() {
 
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
-          <div style={{
-            fontFamily: 'Barlow Condensed', fontSize: 56, fontWeight: 900,
-            color: 'var(--fire)', letterSpacing: 6, lineHeight: 1,
-          }}>
-            🔥 IGNIS
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--mid)', letterSpacing: 3, marginTop: 6, textTransform: 'uppercase' }}>
-            Gestión de Material — Bomberos Jaén
-          </div>
+          <BrandLogo
+            size="lg"
+            title="IGNIS"
+            subtitle="Gestión de Material — Bomberos Jaén"
+            center
+          />
         </div>
 
         {/* Card */}

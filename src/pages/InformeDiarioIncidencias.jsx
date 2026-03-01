@@ -19,7 +19,8 @@ function todayStr() {
 }
 
 export default function InformeDiarioIncidencias() {
-  const { isAdmin, configs, session, showToast, bvUnits } = useApp()
+  const { isAdmin, configs, session, showToast, bvUnits: assignedBvUnits } = useApp()
+  const effectiveBvUnits = assignedBvUnits || DEFAULT_BV_UNITS
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -58,7 +59,7 @@ export default function InformeDiarioIncidencias() {
       reportDate,
       configs,
       actorEmail: session?.user?.email || null,
-      bvUnits: bvUnits || DEFAULT_BV_UNITS,
+      bvUnits: effectiveBvUnits,
       force,
     })
     setRegenerating(false)

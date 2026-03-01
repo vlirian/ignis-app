@@ -36,7 +36,10 @@ export async function buildAndStoreDailyIncidentReport({
 
     if (reportsErr) return { ok: false, error: reportsErr.message || 'reports_error' }
 
-    const effectiveRows = (reportRows || []).filter(r => r.reviewed_by !== 'unidades')
+    const effectiveRows = (reportRows || []).filter((r) => {
+      const reviewedBy = String(r?.reviewed_by || '').toLowerCase()
+      return reviewedBy !== 'unidades' && !reviewedBy.startsWith('borrador:')
+    })
 
     const pendingBvs = []
     const completion = {}

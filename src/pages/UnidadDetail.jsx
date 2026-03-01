@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { useApp } from '../lib/AppContext'
+import { supabase } from '../lib/supabase'
 import { buildZones, zoneStatus, unitSummary, unitAlertLevel } from '../data/units'
 import Modal from '../components/Modal'
 
@@ -21,6 +22,7 @@ function isPersistedItemId(rawId) {
   const txt = String(rawId || '')
   return txt !== '' && !txt.startsWith('tmp-') && /^[0-9]+$/.test(txt)
 }
+const MISSING_NOTE = 'Marcado por bombero: NO está'
 
 function normalizeItemsForCompare(unitItems = {}) {
   const zones = Object.keys(unitItems || {}).sort()
@@ -58,7 +60,9 @@ export default function UnidadDetail() {
   const [reviewIsOk, setReviewIsOk]       = useState(true)
   const [reviewLoading, setReviewLoading] = useState(false)
   const [issueModal, setIssueModal] = useState(null)  // { itemId, itemName, note }
+  const [issueType, setIssueType] = useState('missing') // missing | incident
   const [issueDraft, setIssueDraft] = useState('')
+  const [issueFiles, setIssueFiles] = useState([])
   const [issueSaving, setIssueSaving] = useState(false)
   const [draftItemStates, setDraftItemStates] = useState({})
   const [hasLocalIncidenceEdits, setHasLocalIncidenceEdits] = useState(false)
@@ -251,7 +255,22 @@ export default function UnidadDetail() {
               min: Number(draftItem.min) || 0,
             })
           } else if (Number(baseItem.qty) !== Number(draftItem.qty)) {
-            await updateQty(unitId, zoneId, baseItem.id, Number(draftItem.qty) - Number(baseItem.qty))
+            const qtyRes = await updateQty(unitId, zoneId, baseItem.id, Number(draftItem.qty) - Number(baseItem.qty))
+            if (!qtyRes?.ok) {
+              throw new Error(qtyRes?.error || 'qty_save_error')
+            }
+          }
+
+          if (Number(draftItem.qty) === 0) {
+            const missingState = { status: 'issue', note: MISSING_NOTE }
+            await setUnitItemState(unitId, baseItem.id, missingState)
+            setDraftItemStates(prev => ({ ...prev, [baseItem.id]: missingState }))
+          } else {
+            const curr = draftItemStates?.[baseItem.id] || {}
+            if (curr?.status === 'issue' && String(curr?.note || '').trim() === MISSING_NOTE) {
+              await setUnitItemState(unitId, baseItem.id, { status: null, note: '' })
+              setDraftItemStates(prev => ({ ...prev, [baseItem.id]: { status: null, note: '' } }))
+            }
           }
         }
       }
@@ -261,6 +280,8 @@ export default function UnidadDetail() {
       setDeletedItemIds([])
       setHasPendingInventoryChanges(false)
       showToast('Inventario actualizado', 'ok')
+    } catch (e) {
+      showToast(`No se pudo guardar inventario: ${e?.message || 'error'}`, 'error')
     } finally {
       setSavingInventory(false)
     }
@@ -286,12 +307,47 @@ export default function UnidadDetail() {
   const handleIssueSave = async () => {
     if (!issueModal) return
     setIssueSaving(true)
-    const next = { status: 'issue', note: issueDraft || '' }
+    const note = issueType === 'missing'
+      ? MISSING_NOTE
+      : (issueDraft?.trim() || 'Marcado por bombero: PRESENTA incidencia')
+    const uploadedUrls = []
+    if (issueType === 'incident' && issueFiles.length > 0) {
+      const today = new Date().toISOString().slice(0, 10)
+      for (const file of issueFiles) {
+        const safeName = String(file.name || 'foto.jpg').replace(/[^a-zA-Z0-9._-]/g, '_')
+        const ext = safeName.includes('.') ? safeName.split('.').pop() : 'jpg'
+        const path = `${today}/unidades/u${unitId}/item-${issueModal.itemId}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`
+        const { error: uploadErr } = await supabase.storage.from('revision-observaciones').upload(path, file, { upsert: false })
+        if (uploadErr) {
+          setIssueSaving(false)
+          showToast(`No se pudo subir foto: ${uploadErr.message || 'error'}`, 'error')
+          return
+        }
+        const { data: pub } = supabase.storage.from('revision-observaciones').getPublicUrl(path)
+        if (pub?.publicUrl) uploadedUrls.push(pub.publicUrl)
+      }
+    }
+    const next = { status: 'issue', note }
+
+    // Si se marca como "No está", forzamos cantidad a 0 en el borrador de inventario.
+    if (issueType === 'missing' && issueModal?.zoneId) {
+      setDraftItems(prev => {
+        const zoneItems = (prev?.[issueModal.zoneId] || []).map(it => {
+          if (String(it.id) !== String(issueModal.itemId)) return it
+          return { ...it, qty: 0 }
+        })
+        return { ...prev, [issueModal.zoneId]: zoneItems }
+      })
+      setHasPendingInventoryChanges(true)
+    }
+
     setDraftItemStates(prev => ({ ...prev, [issueModal.itemId]: next }))
-    await setUnitItemState(unitId, issueModal.itemId, next)
+    await setUnitItemState(unitId, issueModal.itemId, next, { photoUrls: uploadedUrls })
     setIssueSaving(false)
     showToast('Incidencia guardada', 'ok')
     setIssueModal(null)
+    setIssueType('missing')
+    setIssueFiles([])
     setIssueDraft('')
   }
 
@@ -555,6 +611,8 @@ export default function UnidadDetail() {
                 showToast('Incidencia resuelta', 'ok')
                 return
               }
+              setIssueType('missing')
+              setIssueFiles([])
               setIssueDraft(draftItemStates[itemId]?.note || '')
               setIssueModal({ itemId, itemName, zoneId: zone.id, zoneLabel: zone.label })
             }}
@@ -569,13 +627,26 @@ export default function UnidadDetail() {
             }}
             onAdd={() => setAddModal(zone.id)}
             onAdjust={(itemId, delta) => {
+              let nextQty = null
               setDraftItems(prev => {
                 const zoneItems = (prev?.[zone.id] || []).map(it => {
                   if (String(it.id) !== String(itemId)) return it
-                  return { ...it, qty: Math.max(0, (Number(it.qty) || 0) + delta) }
+                  nextQty = Math.max(0, (Number(it.qty) || 0) + delta)
+                  return { ...it, qty: nextQty }
                 })
                 return { ...prev, [zone.id]: zoneItems }
               })
+              if (nextQty === 0) {
+                setDraftItemStates(prev => ({ ...prev, [itemId]: { status: 'issue', note: MISSING_NOTE } }))
+              } else {
+                setDraftItemStates(prev => {
+                  const curr = prev?.[itemId] || {}
+                  if (curr.status === 'issue' && String(curr.note || '').trim() === MISSING_NOTE) {
+                    return { ...prev, [itemId]: { status: null, note: '' } }
+                  }
+                  return prev
+                })
+              }
               setHasPendingInventoryChanges(true)
             }}
             onDelete={(itemId, name) => {
@@ -652,19 +723,63 @@ export default function UnidadDetail() {
           }
         >
           <div style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(192,57,43,0.08)', border: '1px solid rgba(192,57,43,0.2)', borderRadius: 8, fontSize: 13, color: 'var(--red-l)' }}>
-            Este artículo quedará marcado con incidencia y aparecerá en el panel de Alertas.
+            Elige el tipo de marca para este artículo.
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{
+                borderColor: issueType === 'missing' ? 'var(--yellow)' : 'var(--border2)',
+                color: issueType === 'missing' ? 'var(--yellow-l)' : 'var(--mid)',
+                background: issueType === 'missing' ? 'rgba(241,196,15,0.12)' : 'transparent',
+              }}
+              onClick={() => setIssueType('missing')}
+            >
+              ✕ No está
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{
+                borderColor: issueType === 'incident' ? 'var(--red)' : 'var(--border2)',
+                color: issueType === 'incident' ? 'var(--red-l)' : 'var(--mid)',
+                background: issueType === 'incident' ? 'rgba(192,57,43,0.12)' : 'transparent',
+              }}
+              onClick={() => setIssueType('incident')}
+            >
+              ⚠ Presenta incidencia
+            </button>
           </div>
           <div className="form-group">
-            <label className="form-label">¿Qué le sucede a este material?</label>
+            <label className="form-label">
+              {issueType === 'missing' ? 'Detalle (opcional)' : 'Descripción de la incidencia'}
+            </label>
             <textarea
               className="form-input"
               style={{ height: 100, resize: 'vertical', fontFamily: 'Barlow' }}
-              placeholder="Ej: Manguera rota, extintor caducado, falta la lanza..."
+              placeholder={issueType === 'missing' ? 'Opcional: dónde falta o desde cuándo...' : 'Ej: Manguera rota, extintor caducado, fuga, pieza suelta...'}
               value={issueDraft}
               onChange={e => setIssueDraft(e.target.value)}
               autoFocus
             />
           </div>
+          {issueType === 'incident' && (
+            <div className="form-group">
+              <label className="form-label">Foto (opcional)</label>
+              <input
+                className="form-input"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                multiple
+                onChange={(e) => setIssueFiles(Array.from(e.target.files || []))}
+              />
+              {issueFiles.length > 0 && (
+                <div style={{ marginTop: 6, fontSize: 12, color: 'var(--mid)' }}>
+                  {issueFiles.length} foto(s) seleccionada(s)
+                </div>
+              )}
+            </div>
+          )}
         </Modal>
       )}
 

@@ -50,6 +50,10 @@ function fmtDate(dateStr) {
   })
 }
 
+function isDraftReviewedBy(reviewedBy = '') {
+  return String(reviewedBy || '').toLowerCase().startsWith('borrador:')
+}
+
 export default function RegistrosDiarios() {
   const { showToast, refreshRevisionIncidents, isAdmin, hasPermission } = useApp()
   const canEdit = hasPermission('edit')
@@ -106,7 +110,7 @@ export default function RegistrosDiarios() {
       setLoading(false)
       return
     }
-    const visibleReports = (data || []).filter(r => r.reviewed_by !== 'unidades')
+    const visibleReports = (data || []).filter(r => r.reviewed_by !== 'unidades' && !isDraftReviewedBy(r.reviewed_by))
     setReports(visibleReports)
     setLoading(false)
   }

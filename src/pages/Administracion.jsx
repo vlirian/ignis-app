@@ -3,7 +3,7 @@ import { useApp } from '../lib/AppContext'
 import { supabase } from '../lib/supabase'
 
 export default function Administracion() {
-  const { isAdmin, session, revisionIncidents, clearAllIncidents, showToast, role, refreshRevisionIncidents } = useApp()
+  const { isAdmin, session, revisionIncidents, clearAllIncidents, showToast, role, refreshRevisionIncidents, configs, bvUnits: assignedBvUnits, assignUnitToBombero } = useApp()
   const [working, setWorking] = useState(false)
   const [requests, setRequests] = useState([])
   const [loadingRequests, setLoadingRequests] = useState(false)
@@ -28,6 +28,8 @@ export default function Administracion() {
   const [incidentRecipientsError, setIncidentRecipientsError] = useState('')
   const [incidentRecipientDraft, setIncidentRecipientDraft] = useState('estudiovic@gmail.com')
   const [incidentRecipientSaving, setIncidentRecipientSaving] = useState(false)
+  const [incidentEmailToggleSaving, setIncidentEmailToggleSaving] = useState(false)
+  const [assignmentSavingUnit, setAssignmentSavingUnit] = useState(null)
 
   const ROLE_OPTIONS = ['admin', 'operador', 'lector']
 
@@ -44,6 +46,30 @@ export default function Administracion() {
     () => (requests || []).filter(r => r.status === 'pending').length,
     [requests]
   )
+  const incidentEmailEnabled = useMemo(
+    () => (incidentRecipients || []).some(r => r.enabled),
+    [incidentRecipients]
+  )
+
+  const activeUnits = useMemo(
+    () => Object.keys(configs || {})
+      .map(Number)
+      .filter(Number.isFinite)
+      .filter(id => configs[id]?.isActive !== false)
+      .sort((a, b) => a - b),
+    [configs]
+  )
+
+  const unitToBombero = useMemo(() => {
+    const map = {}
+    Object.entries(assignedBvUnits || {}).forEach(([rawBv, units]) => {
+      const bv = Number(rawBv)
+      ;(units || []).forEach((u) => {
+        map[Number(u)] = bv
+      })
+    })
+    return map
+  }, [assignedBvUnits])
 
   useEffect(() => {
     if (!isAdmin) return
@@ -211,6 +237,67 @@ export default function Administracion() {
     }
     showToast('Destinatario de incidencias guardado', 'ok')
     await loadIncidentRecipients()
+  }
+
+  async function setIncidentEmailSending(enabled) {
+    setIncidentEmailToggleSaving(true)
+    if (!enabled) {
+      const { error } = await supabase
+        .from('incident_email_recipients')
+        .update({ enabled: false })
+        .neq('email', '')
+      setIncidentEmailToggleSaving(false)
+      if (error) {
+        showToast(`No se pudo desactivar el envío: ${error.message || 'error'}`, 'error')
+        return
+      }
+      showToast('Envío de emails desactivado', 'warn')
+      await loadIncidentRecipients()
+      return
+    }
+
+    const email = String(incidentRecipientDraft || '').trim().toLowerCase()
+    if (!email) {
+      setIncidentEmailToggleSaving(false)
+      showToast('Indica un email para activar el envío', 'warn')
+      return
+    }
+
+    const { error: disableErr } = await supabase
+      .from('incident_email_recipients')
+      .update({ enabled: false })
+      .neq('email', '')
+    if (disableErr) {
+      setIncidentEmailToggleSaving(false)
+      showToast(`No se pudo activar el envío: ${disableErr.message || 'error'}`, 'error')
+      return
+    }
+
+    const { error: upsertErr } = await supabase
+      .from('incident_email_recipients')
+      .upsert({
+        email,
+        enabled: true,
+        updated_by: session?.user?.email || null,
+      }, { onConflict: 'email' })
+    setIncidentEmailToggleSaving(false)
+    if (upsertErr) {
+      showToast(`No se pudo activar el envío: ${upsertErr.message || 'error'}`, 'error')
+      return
+    }
+    showToast('Envío de emails activado', 'ok')
+    await loadIncidentRecipients()
+  }
+
+  async function onAssignUnit(unitId, nextBomberoId) {
+    setAssignmentSavingUnit(unitId)
+    const res = await assignUnitToBombero(unitId, nextBomberoId)
+    setAssignmentSavingUnit(null)
+    if (!res?.ok) {
+      showToast(`No se pudo reasignar unidad: ${res?.error || 'error'}`, 'error')
+      return
+    }
+    showToast(`U${String(unitId).padStart(2, '0')} asignada a BV${nextBomberoId}`, 'ok')
   }
 
   async function loadReviewGroups() {
@@ -457,6 +544,58 @@ export default function Administracion() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
           <div>
             <div style={{ fontSize: 10, color: 'var(--mid)', letterSpacing: 1.5, textTransform: 'uppercase', fontWeight: 700 }}>
+              Asignación de unidades en revisión diaria
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--light)', marginTop: 6 }}>
+              Un administrador puede cambiar qué bombero (BV) revisa cada unidad.
+            </div>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Unidad</th>
+                <th>Asignada a</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {activeUnits.map((unitId) => {
+                const currentBv = unitToBombero[unitId] || 1
+                const busy = assignmentSavingUnit === unitId
+                return (
+                  <tr key={`assign-${unitId}`}>
+                    <td style={{ fontFamily: 'Barlow Condensed', fontSize: 20, fontWeight: 800 }}>
+                      U{String(unitId).padStart(2, '0')}
+                    </td>
+                    <td style={{ width: 220 }}>
+                      <select
+                        className="form-select"
+                        disabled={busy}
+                        value={currentBv}
+                        onChange={(e) => onAssignUnit(unitId, Number(e.target.value))}
+                      >
+                        {[1, 2, 3, 4, 5, 6, 7].map((bv) => (
+                          <option key={`bv-${unitId}-${bv}`} value={bv}>BV{bv}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td style={{ fontSize: 12, color: 'var(--mid)' }}>
+                      {busy ? 'Guardando...' : 'Activo'}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 20, marginTop: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--mid)', letterSpacing: 1.5, textTransform: 'uppercase', fontWeight: 700 }}>
               Accesos
             </div>
             <div style={{ fontSize: 13, color: 'var(--light)', marginTop: 6 }}>
@@ -557,6 +696,22 @@ export default function Administracion() {
           </div>
         ) : (
           <div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+              <span className={`chip ${incidentEmailEnabled ? 'chip-ok' : 'chip-warn'}`}>
+                {incidentEmailEnabled ? 'Envío ACTIVO' : 'Envío DESACTIVADO'}
+              </span>
+              <button
+                className={`btn btn-sm ${incidentEmailEnabled ? 'btn-danger' : 'btn-primary'}`}
+                onClick={() => setIncidentEmailSending(!incidentEmailEnabled)}
+                disabled={incidentEmailToggleSaving}
+              >
+                {incidentEmailToggleSaving
+                  ? 'Guardando...'
+                  : incidentEmailEnabled
+                    ? 'Desactivar envío de email'
+                    : 'Activar envío de email'}
+              </button>
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'end', marginBottom: 10 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">Email administrador destinatario</label>
@@ -573,9 +728,9 @@ export default function Administracion() {
               </button>
             </div>
             <div style={{ fontSize: 12, color: 'var(--mid)' }}>
-              Activo ahora:{' '}
+              Destinatario activo:{' '}
               <strong style={{ color: 'var(--light)' }}>
-                {(incidentRecipients.find(r => r.enabled)?.email) || 'estudiovic@gmail.com'}
+                {(incidentRecipients.find(r => r.enabled)?.email) || 'Sin destinatario activo'}
               </strong>
             </div>
           </div>

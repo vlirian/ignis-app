@@ -1,0 +1,22 @@
+import escudoJaen from '../../escudo.png'
+
+export default function BrandLogo({
+  size = 'md',
+  title = 'IGNIS',
+  subtitle = 'Gestión de Material — Bomberos Jaén',
+  version = '',
+  center = false,
+}) {
+  return (
+    <div className={`brand-logo ${center ? 'center' : ''}`}>
+      <div className={`brand-logo-shield-wrap ${size}`}>
+        <img src={escudoJaen} alt="Escudo Bomberos Jaén" className="brand-logo-shield" />
+      </div>
+      <div className="brand-logo-text">
+        <div className="brand-logo-title">{title}</div>
+        {subtitle ? <div className="brand-logo-subtitle">{subtitle}</div> : null}
+        {version ? <div className="brand-logo-version">{version}</div> : null}
+      </div>
+    </div>
+  )
+}

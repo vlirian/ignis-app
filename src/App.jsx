@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { Component, useState } from 'react'
 import { Routes, Route, useLocation, NavLink } from 'react-router-dom'
 import { AppProvider, useApp } from './lib/AppContext'
 import Sidebar from './components/Sidebar'
 import Toast from './components/Toast'
 import GlobalSearch from './components/GlobalSearch'
 import IncidentBanner from './components/IncidentBanner'
+import BrandLogo from './components/BrandLogo'
 import LoginPage from './pages/LoginPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import Dashboard from './pages/Dashboard'
@@ -40,9 +41,11 @@ function LoadingScreen() {
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
       gap: 16, zIndex: 999,
     }}>
-      <div style={{ fontFamily: 'Barlow Condensed', fontSize: 42, fontWeight: 900, color: 'var(--fire)', letterSpacing: 4 }}>
-        🔥 IGNIS
-      </div>
+      <BrandLogo
+        size="md"
+        title="IGNIS"
+        subtitle=""
+      />
       <div style={{ fontSize: 13, color: 'var(--mid)', letterSpacing: 2 }}>CARGANDO DATOS...</div>
       <div style={{ width: 200, height: 3, background: 'var(--border)', borderRadius: 2, overflow: 'hidden', marginTop: 8 }}>
         <div style={{ height: '100%', background: 'var(--fire)', borderRadius: 2, animation: 'loadbar 1.5s ease-in-out infinite' }} />
@@ -142,7 +145,65 @@ function MobileQuickNav() {
 export default function App() {
   return (
     <AppProvider>
-      <AppInner />
+      <AppErrorBoundary>
+        <AppInner />
+      </AppErrorBoundary>
     </AppProvider>
   )
+}
+
+class AppErrorBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('IGNIS runtime error:', error, errorInfo)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      const message = String(this.state.error?.message || this.state.error || 'Error desconocido')
+      return (
+        <div style={{
+          minHeight: '100vh',
+          background: 'var(--smoke)',
+          color: 'var(--light)',
+          display: 'grid',
+          placeItems: 'center',
+          padding: 24,
+        }}>
+          <div className="card" style={{ maxWidth: 760, width: '100%', padding: 20, border: '1px solid rgba(192,57,43,0.45)' }}>
+            <div style={{ fontFamily: 'Barlow Condensed', fontSize: 30, fontWeight: 900, color: 'var(--red-l)', marginBottom: 8 }}>
+              Error en la app
+            </div>
+            <div style={{ fontSize: 14, color: 'var(--light)', marginBottom: 12 }}>
+              Se produjo un error de ejecución en el frontend.
+            </div>
+            <div style={{
+              fontFamily: 'Roboto Mono, monospace',
+              fontSize: 13,
+              background: 'rgba(0,0,0,0.3)',
+              border: '1px solid var(--border2)',
+              borderRadius: 8,
+              padding: 10,
+              color: 'var(--red-l)',
+              wordBreak: 'break-word',
+            }}>
+              {message}
+            </div>
+            <div style={{ marginTop: 12, fontSize: 12, color: 'var(--mid)' }}>
+              Recarga la página. Si persiste, copia este error y pásamelo.
+            </div>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
