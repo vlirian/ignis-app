@@ -263,12 +263,14 @@ export default function UnidadDetail() {
 
           if (Number(draftItem.qty) === 0) {
             const missingState = { status: 'issue', note: MISSING_NOTE }
-            await setUnitItemState(unitId, baseItem.id, missingState)
+            const missingRes = await setUnitItemState(unitId, baseItem.id, missingState)
+            if (!missingRes?.ok) throw new Error(missingRes?.error || 'missing_sync_error')
             setDraftItemStates(prev => ({ ...prev, [baseItem.id]: missingState }))
           } else {
             const curr = draftItemStates?.[baseItem.id] || {}
             if (curr?.status === 'issue' && String(curr?.note || '').trim() === MISSING_NOTE) {
-              await setUnitItemState(unitId, baseItem.id, { status: null, note: '' })
+              const resolveRes = await setUnitItemState(unitId, baseItem.id, { status: null, note: '' })
+              if (!resolveRes?.ok) throw new Error(resolveRes?.error || 'resolve_sync_error')
               setDraftItemStates(prev => ({ ...prev, [baseItem.id]: { status: null, note: '' } }))
             }
           }
@@ -342,7 +344,12 @@ export default function UnidadDetail() {
     }
 
     setDraftItemStates(prev => ({ ...prev, [issueModal.itemId]: next }))
-    await setUnitItemState(unitId, issueModal.itemId, next, { photoUrls: uploadedUrls })
+    const saveRes = await setUnitItemState(unitId, issueModal.itemId, next, { photoUrls: uploadedUrls })
+    if (!saveRes?.ok) {
+      setIssueSaving(false)
+      showToast(`No se pudo guardar incidencia: ${saveRes?.error || 'error'}`, 'error')
+      return
+    }
     setIssueSaving(false)
     showToast('Incidencia guardada', 'ok')
     setIssueModal(null)
@@ -377,7 +384,12 @@ export default function UnidadDetail() {
     setSavingIncidences(true)
     for (const itemId of changedIds) {
       const draft = draftItemStates?.[itemId] || { status: null, note: '' }
-      await setUnitItemState(unitId, itemId, { status: draft.status || null, note: draft.note || '' })
+      const res = await setUnitItemState(unitId, itemId, { status: draft.status || null, note: draft.note || '' })
+      if (!res?.ok) {
+        setSavingIncidences(false)
+        showToast(`No se pudo guardar incidencia (${itemId}): ${res?.error || 'error'}`, 'error')
+        return
+      }
     }
     setSavingIncidences(false)
     setHasLocalIncidenceEdits(false)
@@ -605,8 +617,12 @@ export default function UnidadDetail() {
               if (currentStatus === 'issue') {
                 const ok = window.confirm('¿Marcar esta incidencia como resuelta?')
                 if (!ok) return
+                const res = await setUnitItemState(unitId, itemId, { status: null, note: '' })
+                if (!res?.ok) {
+                  showToast(`No se pudo resolver incidencia: ${res?.error || 'error'}`, 'error')
+                  return
+                }
                 setDraftItemStates(prev => ({ ...prev, [itemId]: { status: null, note: '' } }))
-                await setUnitItemState(unitId, itemId, { status: null, note: '' })
                 setHasLocalIncidenceEdits(false)
                 showToast('Incidencia resuelta', 'ok')
                 return

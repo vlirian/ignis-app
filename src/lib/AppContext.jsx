@@ -553,8 +553,9 @@ export function AppProvider({ children }) {
   const setUnitItemState = useCallback(async (unitId, itemId, state, options = {}) => {
     if (!hasPermission('edit')) {
       showToast('Solo lectura: no puedes modificar inventario', 'warn')
-      return
+      return { ok: false, error: 'read_only' }
     }
+    const prevLocalState = itemStates?.[unitId]?.[itemId] || { status: null, note: '' }
     const localPrevStatus = itemStates?.[unitId]?.[itemId]?.status || null
     const meta = resolveItemMeta(unitId, itemId)
     const inRevisionIncidents = (() => {
@@ -574,7 +575,7 @@ export function AppProvider({ children }) {
       [unitId]: { ...(prev[unitId] || {}), [itemId]: state }
     }))
 
-    if (!meta) return
+    if (!meta) return { ok: true }
 
     if (state?.status === 'issue') {
       const sync = await syncIncidentToReports({
@@ -586,7 +587,14 @@ export function AppProvider({ children }) {
         source: 'unidad',
         photoUrls: Array.isArray(options?.photoUrls) ? options.photoUrls : [],
       })
-      if (!sync?.ok) showToast(`No se pudo sincronizar: ${sync.error || 'error'}`, 'error')
+      if (!sync?.ok) {
+        setItemStates(prev => ({
+          ...prev,
+          [unitId]: { ...(prev[unitId] || {}), [itemId]: prevLocalState }
+        }))
+        showToast(`No se pudo sincronizar: ${sync.error || 'error'}`, 'error')
+        return { ok: false, error: sync.error || 'sync_error' }
+      }
       await logInventoryChange({
         unitId,
         zoneId: meta.zoneId,
@@ -597,7 +605,7 @@ export function AppProvider({ children }) {
         previousValue: { status: prevStatus || null },
         newValue: { status: 'issue' },
       })
-      return
+      return { ok: true }
     }
 
     if (prevStatus === 'issue' && state?.status !== 'issue') {
@@ -607,7 +615,14 @@ export function AppProvider({ children }) {
         zoneLabel: meta.zoneLabel,
         itemName: meta.itemName,
       })
-      if (!clear?.ok) showToast(`No se pudo quitar sincronizada: ${clear.error || 'error'}`, 'error')
+      if (!clear?.ok) {
+        setItemStates(prev => ({
+          ...prev,
+          [unitId]: { ...(prev[unitId] || {}), [itemId]: prevLocalState }
+        }))
+        showToast(`No se pudo quitar sincronizada: ${clear.error || 'error'}`, 'error')
+        return { ok: false, error: clear.error || 'clear_error' }
+      }
       await logInventoryChange({
         unitId,
         zoneId: meta.zoneId,
@@ -618,7 +633,7 @@ export function AppProvider({ children }) {
         previousValue: { status: prevStatus || null },
         newValue: { status: state?.status || null },
       })
-      return
+      return { ok: true }
     }
 
     if (prevStatus !== (state?.status || null)) {
@@ -633,6 +648,7 @@ export function AppProvider({ children }) {
         newValue: { status: state?.status || null },
       })
     }
+    return { ok: true }
   }, [itemStates, revisionIncidents, resolveItemMeta, syncIncidentToReports, clearIncidentFromReports, showToast, logInventoryChange, hasPermission])
 
   const setUnitAllItemStates = useCallback((unitId, states) => {
