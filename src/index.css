@@ -24,6 +24,28 @@
   --incident-floating-height: 112px;
 }
 
+:root[data-theme='light'] {
+  --fire: #e85a19;
+  --fire2: #ff6b2b;
+  --ember: #ff9a3c;
+  --smoke: #f2f4f8;
+  --ash: #ffffff;
+  --panel: #f4f6fb;
+  --border: #d9deea;
+  --border2: #c8cfdd;
+  --mid: #61687a;
+  --light: #2f3545;
+  --white: #161a23;
+  --green: #1f9d57;
+  --green-l: #1ea85d;
+  --yellow: #d9822b;
+  --yellow-l: #db8b28;
+  --red: #c44536;
+  --red-l: #d64b3c;
+  --blue: #2a78c7;
+  --blue-l: #2d8be0;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 html, body, #root {

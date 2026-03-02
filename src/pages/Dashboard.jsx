@@ -185,11 +185,11 @@ export default function Dashboard() {
           style={{
             marginBottom: 24,
             borderColor: 'rgba(168,85,247,0.35)',
-            background: 'linear-gradient(180deg, rgba(168,85,247,0.11), rgba(168,85,247,0.05))',
+            background: 'linear-gradient(180deg, rgba(168,85,247,0.12), rgba(168,85,247,0.06))',
           }}
         >
           <div className="card-header" style={{ borderBottom: '1px solid rgba(168,85,247,0.22)' }}>
-            <div className="card-title" style={{ color: '#c084fc' }}>🏢 Incidencias de instalaciones</div>
+            <div className="card-title" style={{ color: '#8b5cf6' }}>🏢 Incidencias de instalaciones</div>
             <button className="btn btn-ghost btn-sm" onClick={() => navigate('/instalaciones')}>Ver instalaciones</button>
           </div>
           <div style={{ padding: '8px 20px 16px', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -198,9 +198,9 @@ export default function Dashboard() {
                 key={inc.id}
                 onClick={() => navigate('/instalaciones')}
                 style={{
-                  background: 'rgba(167,139,250,0.18)',
-                  border: '1px solid rgba(167,139,250,0.5)',
-                  color: '#e9d5ff',
+                  background: 'rgba(167,139,250,0.14)',
+                  border: '1px solid rgba(139,92,246,0.45)',
+                  color: 'var(--white)',
                   borderRadius: 8,
                   padding: '6px 14px',
                   cursor: 'pointer',

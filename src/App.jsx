@@ -1,4 +1,4 @@
-import { Component, useState } from 'react'
+import { Component, useEffect, useState } from 'react'
 import { Routes, Route, useLocation, NavLink } from 'react-router-dom'
 import { AppProvider, useApp } from './lib/AppContext'
 import Sidebar from './components/Sidebar'
@@ -68,8 +68,20 @@ function LoadingScreen() {
 
 function AppInner() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [theme, setTheme] = useState(() => {
+    if (typeof window === 'undefined') return 'dark'
+    return window.localStorage.getItem('ignis-theme') || 'dark'
+  })
   const { loading, session, authReady, recovering, logout } = useApp()
   const location = useLocation()
+
+  useEffect(() => {
+    const next = theme === 'light' ? 'light' : 'dark'
+    document.documentElement.setAttribute('data-theme', next)
+    try {
+      window.localStorage.setItem('ignis-theme', next)
+    } catch {}
+  }, [theme])
 
   if (recovering) return <ResetPasswordPage />
 
@@ -100,6 +112,14 @@ function AppInner() {
           </div>
 
           <div className="topbar-right">
+            <button
+              onClick={() => setTheme(prev => (prev === 'dark' ? 'light' : 'dark'))}
+              className="btn btn-ghost btn-sm"
+              style={{ fontSize: 11, padding: '4px 10px' }}
+              title={theme === 'dark' ? 'Cambiar a modo día' : 'Cambiar a modo noche'}
+            >
+              {theme === 'dark' ? '☀️ Día' : '🌙 Noche'}
+            </button>
             <span className="user-chip" title={userEmail}>👤 {userEmail}</span>
             <button onClick={logout} className="btn btn-ghost btn-sm" style={{ fontSize: 11, color: 'var(--mid)', padding: '4px 10px' }} title="Cerrar sesión">
               ⎋ Salir
