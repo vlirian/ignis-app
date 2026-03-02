@@ -18,10 +18,14 @@ const DEFAULT_BV_UNITS = {
 
 const NAV = [
   { to: '/panel',        icon: '📊', label: 'Panel General' },
-  { to: '/alertas',      icon: '🚨', label: 'Alertas',       badge: 'alert' },
-  { to: '/unidades',     icon: '🚒', label: 'Unidades' },
-  { to: '/revision',     icon: '📅', label: 'Revisión diaria' },
+  { to: '/novedades',    icon: '🆕', label: 'Novedades' },
+  { to: '/incidencias',  icon: '🚨', label: 'Incidencias',   badge: 'alert' },
   { to: '/registros',    icon: '🗂️', label: 'Registros diarios' },
+  { to: '/jefatura',     icon: '👨‍💼', label: 'Jefatura' },
+  { to: '/revision',     icon: '📅', label: 'Revisión diaria' },
+  { to: '/unidades',     icon: '🚒', label: 'Material Unidades' },
+  { to: '/vehiculos',    icon: '🚚', label: 'Vehículos' },
+  { to: '/instalaciones', icon: '🏢', label: 'Instalaciones' },
   { to: '/epi',          icon: '🦺', label: 'EPI' },
   { to: '/herramientas', icon: '⚙️',  label: 'Herramientas' },
   { to: '/sanitario',    icon: '🩺', label: 'Sanitario' },
@@ -44,7 +48,7 @@ function isDraftReviewedBy(reviewedBy = '') {
 }
 
 export default function Sidebar({ open, onClose }) {
-  const { configs, items, isAdmin, revisionIncidents, bvUnits: assignedBvUnits } = useApp()
+  const { configs, items, isAdmin, revisionIncidents, bvUnits: assignedBvUnits, materialMenuEnabled } = useApp()
   const effectiveBvUnits = assignedBvUnits || DEFAULT_BV_UNITS
   const navItems = NAV.filter(item => !item.adminOnly || isAdmin)
   const [revisionPending, setRevisionPending] = useState(false)
@@ -146,14 +150,14 @@ export default function Sidebar({ open, onClose }) {
           <BrandLogo
             size="sm"
             title="IGNIS"
-            subtitle="Gestión de Material"
+            subtitle="Gestión de Parques"
             version="v1.0"
           />
         </div>
 
         <nav className={styles.nav}>
           <div className={styles.sectionLabel}>Principal</div>
-          {navItems.slice(0, 2).map(item => (
+          {navItems.filter(i => ['/panel', '/novedades', '/incidencias', '/registros', '/jefatura'].includes(i.to)).map(item => (
             <NavItem
               key={item.to}
               item={item}
@@ -164,7 +168,7 @@ export default function Sidebar({ open, onClose }) {
           ))}
 
           <div className={styles.sectionLabel}>Operaciones</div>
-          {navItems.filter(i => ['/unidades', '/revision', '/registros'].includes(i.to)).map(item => (
+          {navItems.filter(i => ['/revision', '/unidades', '/vehiculos', '/instalaciones'].includes(i.to)).map(item => (
             <NavItem
               key={item.to}
               item={item}
@@ -173,10 +177,14 @@ export default function Sidebar({ open, onClose }) {
             />
           ))}
 
-          <div className={styles.sectionLabel}>Material</div>
-          {navItems.filter(i => ['/epi', '/herramientas', '/sanitario'].includes(i.to)).map(item => (
-            <NavItem key={item.to} item={item} onClose={onClose} />
-          ))}
+          {materialMenuEnabled && (
+            <>
+              <div className={styles.sectionLabel}>Material</div>
+              {navItems.filter(i => ['/epi', '/herramientas', '/sanitario'].includes(i.to)).map(item => (
+                <NavItem key={item.to} item={item} onClose={onClose} />
+              ))}
+            </>
+          )}
 
           <div className={styles.sectionLabel}>Sistema</div>
           {navItems.filter(i => ['/mantenimiento', '/turnos', '/admin', '/informe-incidencias'].includes(i.to)).map(item => (

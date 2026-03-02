@@ -3,7 +3,7 @@ import { useApp } from '../lib/AppContext'
 import { supabase } from '../lib/supabase'
 
 export default function Administracion() {
-  const { isAdmin, session, revisionIncidents, clearAllIncidents, showToast, role, refreshRevisionIncidents, configs, bvUnits: assignedBvUnits, assignUnitToBombero } = useApp()
+  const { isAdmin, session, revisionIncidents, clearAllIncidents, showToast, role, refreshRevisionIncidents, configs, bvUnits: assignedBvUnits, assignUnitToBombero, materialMenuEnabled, setMaterialMenuEnabled } = useApp()
   const [working, setWorking] = useState(false)
   const [requests, setRequests] = useState([])
   const [loadingRequests, setLoadingRequests] = useState(false)
@@ -30,6 +30,7 @@ export default function Administracion() {
   const [incidentRecipientSaving, setIncidentRecipientSaving] = useState(false)
   const [incidentEmailToggleSaving, setIncidentEmailToggleSaving] = useState(false)
   const [assignmentSavingUnit, setAssignmentSavingUnit] = useState(null)
+  const [materialMenuSaving, setMaterialMenuSaving] = useState(false)
 
   const ROLE_OPTIONS = ['admin', 'operador', 'lector']
 
@@ -300,6 +301,17 @@ export default function Administracion() {
     showToast(`U${String(unitId).padStart(2, '0')} asignada a BV${nextBomberoId}`, 'ok')
   }
 
+  async function toggleMaterialMenu() {
+    setMaterialMenuSaving(true)
+    const res = await setMaterialMenuEnabled(!materialMenuEnabled)
+    setMaterialMenuSaving(false)
+    if (!res?.ok) {
+      showToast(`No se pudo actualizar menú de Material: ${res?.error || 'error'}`, 'error')
+      return
+    }
+    showToast(materialMenuEnabled ? 'Apartado Material desactivado' : 'Apartado Material activado', 'ok')
+  }
+
   async function loadReviewGroups() {
     setLoadingReviewGroups(true)
     setReviewGroupsError('')
@@ -525,6 +537,33 @@ export default function Administracion() {
             <div style={{ fontFamily: 'Barlow Condensed', fontSize: 26, fontWeight: 900, color: pendingCount > 0 ? 'var(--yellow-l)' : 'var(--green-l)' }}>{pendingCount}</div>
             <div style={{ fontSize: 11, color: 'var(--mid)' }}>Solicitudes pendientes</div>
           </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 20, marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--mid)', letterSpacing: 1.5, textTransform: 'uppercase', fontWeight: 700 }}>
+              Menú de material
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--light)', marginTop: 6 }}>
+              Controla si se muestra o no el apartado Material (EPI, Herramientas y Sanitario) en el sidebar.
+            </div>
+          </div>
+          <button
+            className={`btn btn-sm ${materialMenuEnabled ? 'btn-danger' : 'btn-primary'}`}
+            onClick={toggleMaterialMenu}
+            disabled={materialMenuSaving}
+          >
+            {materialMenuSaving
+              ? 'Guardando...'
+              : materialMenuEnabled
+                ? 'Desactivar Material'
+                : 'Activar Material'}
+          </button>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--mid)' }}>
+          Estado actual: <strong style={{ color: 'var(--light)' }}>{materialMenuEnabled ? 'ACTIVO' : 'DESACTIVADO'}</strong>
         </div>
       </div>
 

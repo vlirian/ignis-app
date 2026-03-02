@@ -104,7 +104,7 @@ export default function IncidentBanner() {
           {/* Ir a alertas */}
           <div style={{ padding: '8px 16px' }}>
             <button
-              onClick={() => { navigate('/alertas'); setExpanded(false) }}
+              onClick={() => { navigate('/incidencias'); setExpanded(false) }}
               style={{
                 width: '100%', padding: '8px', background: 'rgba(192,57,43,0.12)',
                 border: '1px solid rgba(192,57,43,0.3)', borderRadius: 7,

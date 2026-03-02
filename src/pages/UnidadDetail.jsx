@@ -75,6 +75,7 @@ export default function UnidadDetail() {
   const [hasPendingInventoryChanges, setHasPendingInventoryChanges] = useState(false)
   const [savingInventory, setSavingInventory] = useState(false)
   const [deletedItemIds, setDeletedItemIds] = useState([])
+  const [unitSearch, setUnitSearch] = useState('')
 
   const goToDailyRevision = () => {
     guardedNavigate('/revision', {
@@ -476,6 +477,26 @@ export default function UnidadDetail() {
   }, [location.search, allZones, workingItems])
 
   const zonesToShow = selectedZone ? allZones.filter(z => z.id === selectedZone) : allZones
+  const normalizedUnitSearch = String(unitSearch || '').trim().toLowerCase()
+  const filteredItemsByZone = useMemo(() => {
+    if (!normalizedUnitSearch) return null
+    const out = {}
+    allZones.forEach((z) => {
+      const base = workingItems?.[z.id] || []
+      out[z.id] = base.filter((it) => {
+        const name = String(it.name || '').toLowerCase()
+        const desc = String(it.desc || '').toLowerCase()
+        return name.includes(normalizedUnitSearch) || desc.includes(normalizedUnitSearch)
+      })
+    })
+    return out
+  }, [normalizedUnitSearch, allZones, workingItems])
+
+  const visibleZones = useMemo(() => {
+    if (!normalizedUnitSearch) return zonesToShow
+    return zonesToShow.filter(z => (filteredItemsByZone?.[z.id] || []).length > 0)
+  }, [normalizedUnitSearch, zonesToShow, filteredItemsByZone])
+
   const canPortal = typeof window !== 'undefined' && typeof document !== 'undefined'
 
   return (
@@ -547,6 +568,26 @@ export default function UnidadDetail() {
         ))}
       </div>
 
+      <div className="card" style={{ padding: '12px 14px', marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: 'var(--mid)', letterSpacing: 1.2, textTransform: 'uppercase', fontWeight: 700 }}>
+            Buscar en esta unidad
+          </span>
+          <input
+            className="form-input"
+            value={unitSearch}
+            onChange={e => setUnitSearch(e.target.value)}
+            placeholder={`Ej: manguera, extintor, ${selectedZone ? 'solo zona seleccionada' : 'cualquier zona'}...`}
+            style={{ maxWidth: 460 }}
+          />
+          {unitSearch && (
+            <button className="btn btn-ghost btn-sm" onClick={() => setUnitSearch('')}>
+              Limpiar
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Review panel */}
       <ReviewPanel
         review={reviews[unitId]}
@@ -601,11 +642,15 @@ export default function UnidadDetail() {
 
       {/* Zone cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 14 }}>
-        {zonesToShow.map(zone => (
+        {visibleZones.map(zone => {
+          const zoneItemsAll = workingItems?.[zone.id] || []
+          const zoneItemsVisible = normalizedUnitSearch ? (filteredItemsByZone?.[zone.id] || []) : zoneItemsAll
+          return (
           <ZoneCard
             key={zone.id}
             zone={zone}
-            zoneItems={workingItems?.[zone.id] || []}
+            zoneItems={zoneItemsVisible}
+            zoneItemsAll={zoneItemsAll}
             itemStates={draftItemStates}
             focusedItemId={focusedItemId}
             onSetOk={(itemId) => {
@@ -677,8 +722,15 @@ export default function UnidadDetail() {
               showToast(`Eliminado: ${name}`, 'warn')
             }}
           />
-        ))}
+          )
+        })}
       </div>
+
+      {normalizedUnitSearch && visibleZones.length === 0 && (
+        <div className="card" style={{ padding: 16, marginTop: 12, color: 'var(--mid)' }}>
+          No hay coincidencias en esta unidad para <strong style={{ color: 'var(--light)' }}>"{unitSearch}"</strong>.
+        </div>
+      )}
 
       {/* Modal: añadir artículo */}
       {addModal && (
@@ -1018,11 +1070,12 @@ function ZoneBlock({ zone, status, items, selected, onClick, flex = 1, minH = 80
   )
 }
 
-function ZoneCard({ zone, zoneItems, itemStates, focusedItemId, onSetOk, onSetIssue, onMarkAll, onAdd, onAdjust, onDelete }) {
-  const status = zoneStatus(zoneItems)
+function ZoneCard({ zone, zoneItems, zoneItemsAll, itemStates, focusedItemId, onSetOk, onSetIssue, onMarkAll, onAdd, onAdjust, onDelete }) {
+  const allItems = zoneItemsAll || zoneItems || []
+  const status = zoneStatus(allItems)
   const chipMap = { ok: 'chip-ok', warn: 'chip-warn', alert: 'chip-alert' }
   const label   = { ok: 'OK', warn: 'Stock bajo', alert: 'Faltante' }
-  const missing = zoneItems.filter(i => i.qty < i.min).length
+  const missing = allItems.filter(i => i.qty < i.min).length
 
   return (
     <div className="card">
@@ -1034,16 +1087,16 @@ function ZoneCard({ zone, zoneItems, itemStates, focusedItemId, onSetOk, onSetIs
           </div>
           <div style={{ fontSize: 11, color: 'var(--mid)', marginTop: 2 }}>
             {(() => {
-              const okCount    = zoneItems.filter(i => itemStates[i.id]?.status === 'ok').length
-              const issueCount = zoneItems.filter(i => itemStates[i.id]?.status === 'issue').length
-              return <>{zoneItems.length} artículos{missing > 0 ? ` · ${missing} por reponer` : ''}{okCount > 0 && <span style={{ color: 'var(--green-l)' }}> · ✔ {okCount} ok</span>}{issueCount > 0 && <span style={{ color: 'var(--red-l)' }}> · ⚠ {issueCount}</span>}</>
+              const okCount    = allItems.filter(i => itemStates[i.id]?.status === 'ok').length
+              const issueCount = allItems.filter(i => itemStates[i.id]?.status === 'issue').length
+              return <>{allItems.length} artículos{missing > 0 ? ` · ${missing} por reponer` : ''}{okCount > 0 && <span style={{ color: 'var(--green-l)' }}> · ✔ {okCount} ok</span>}{issueCount > 0 && <span style={{ color: 'var(--red-l)' }}> · ⚠ {issueCount}</span>}</>
             })()}
           </div>
         </div>
-        {zoneItems.length > 0 && (
+        {allItems.length > 0 && (
           <button
             onClick={() => {
-              onMarkAll(zoneItems)
+              onMarkAll(allItems)
             }}
             style={{
               background: 'transparent', border: '1px solid var(--border2)', borderRadius: 6,
@@ -1053,7 +1106,7 @@ function ZoneCard({ zone, zoneItems, itemStates, focusedItemId, onSetOk, onSetIs
             onMouseEnter={e => { e.target.style.borderColor = 'var(--green)'; e.target.style.color = 'var(--green-l)' }}
             onMouseLeave={e => { e.target.style.borderColor = ''; e.target.style.color = '' }}
           >
-            {zoneItems.every(i => itemStates[i.id]?.status === 'ok') ? '✕ Desmarcar todo' : '✔ Marcar todo OK'}
+            {allItems.every(i => itemStates[i.id]?.status === 'ok') ? '✕ Desmarcar todo' : '✔ Marcar todo OK'}
           </button>
         )}
       </div>

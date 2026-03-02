@@ -3,7 +3,7 @@ import escudoJaen from '../../escudo.png'
 export default function BrandLogo({
   size = 'md',
   title = 'IGNIS',
-  subtitle = 'Gestión de Material — Bomberos Jaén',
+  subtitle = 'Gestión de Parques — Bomberos Jaén',
   version = '',
   center = false,
 }) {

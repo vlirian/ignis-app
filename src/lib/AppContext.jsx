@@ -124,6 +124,7 @@ export function AppProvider({ children }) {
   const [revisionIncidents, setRevisionIncidents] = useState([])  // incidencias de informes BV de hoy
   const [bvUnits, setBvUnits] = useState(DEFAULT_BV_UNITS)
   const [userRole, setUserRole] = useState('lector')
+  const [materialMenuEnabled, setMaterialMenuEnabledState] = useState(true)
   const loggedSessionIds = useRef(new Set())
   const currentEmail = (session?.user?.email || '').trim().toLowerCase()
   const effectiveRole = userRole || (ADMIN_EMAILS.includes(currentEmail) ? 'admin' : 'lector')
@@ -217,6 +218,23 @@ export function AppProvider({ children }) {
           resolvedRole = roleData.role
         }
         setUserRole(resolvedRole)
+      }
+
+      // Ajustes globales de UI
+      try {
+        const { data: uiRow, error: uiErr } = await supabase
+          .from('app_ui_settings')
+          .select('value_json')
+          .eq('key', 'material_menu')
+          .maybeSingle()
+        if (!uiErr) {
+          const enabled = uiRow?.value_json?.enabled
+          setMaterialMenuEnabledState(enabled === undefined ? true : !!enabled)
+        } else {
+          setMaterialMenuEnabledState(true)
+        }
+      } catch {
+        setMaterialMenuEnabledState(true)
       }
 
       const { data: cfgData, error: cfgErr } = await supabase.from('unit_configs').select('*')
@@ -976,11 +994,27 @@ export function AppProvider({ children }) {
     await loadAll(true)
   }, [])
 
+  const setMaterialMenuEnabled = useCallback(async (enabled) => {
+    if (!isAdmin) return { ok: false, error: 'not_admin' }
+    const next = !!enabled
+    const { error } = await supabase
+      .from('app_ui_settings')
+      .upsert({
+        key: 'material_menu',
+        value_json: { enabled: next },
+        updated_by: session?.user?.email || null,
+      }, { onConflict: 'key' })
+    if (error) return { ok: false, error: error.message || 'db_error' }
+    setMaterialMenuEnabledState(next)
+    return { ok: true }
+  }, [isAdmin, session?.user?.email])
+
   return (
     <AppContext.Provider value={{
       session, authReady, recovering, finishRecovery, isAdmin, logout,
       role: effectiveRole, rolePermissions: ROLE_PERMISSIONS, hasPermission,
       bvUnits, assignUnitToBombero,
+      materialMenuEnabled, setMaterialMenuEnabled,
       configs: state.configs, items: state.items, reviews,
       loading, toast, showToast,
       itemStates, setUnitItemState, setUnitAllItemStates,

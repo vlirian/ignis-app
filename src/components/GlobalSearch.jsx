@@ -1,14 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../lib/AppContext'
-import { buildZones } from '../data/units'
+import { findInventoryMatches } from '../lib/searchItems'
 
 export default function GlobalSearch() {
   const [open, setOpen]       = useState(false)
   const [query, setQuery]     = useState('')
   const [results, setResults] = useState([])
   const [selected, setSelected] = useState(0)
-  const [submitted, setSubmitted] = useState(false)
   const inputRef = useRef(null)
   const navigate = useNavigate()
   const { configs, items } = useApp()
@@ -31,57 +30,13 @@ export default function GlobalSearch() {
       setQuery('')
       setResults([])
       setSelected(0)
-      setSubmitted(false)
     }
   }, [open])
 
   useEffect(() => {
     if (!query.trim()) { setResults([]); setSelected(0); return }
-    const q = query.toLowerCase().trim()
-    const found = []
-
-    const activeUnitIds = Object.keys(configs || {})
-      .map(Number)
-      .filter(Number.isFinite)
-      .filter(unitId => configs[unitId]?.isActive !== false)
-
-    activeUnitIds.forEach(unitId => {
-      const cfg = configs[unitId]
-      if (!cfg) return
-      const zones = buildZones(cfg.numCofres, cfg.hasTecho, cfg.hasTrasera)
-      zones.forEach(zone => {
-        const zItems = items[unitId]?.[zone.id] || []
-        zItems.forEach(item => {
-          const nameMatch = item.name.toLowerCase().includes(q)
-          const descMatch = item.desc?.toLowerCase().includes(q)
-          if (nameMatch || descMatch) {
-            found.push({
-              unitId,
-              unitLabel: `U${String(unitId).padStart(2,'0')}`,
-              zone: zone.label,
-              zoneId: zone.id,
-              zoneIcon: zone.icon,
-              item: item.name,
-              desc: item.desc,
-              qty: item.qty,
-              min: item.min,
-              matchDesc: !nameMatch && descMatch,
-            })
-          }
-        })
-      })
-    })
-
-    found.sort((a, b) => {
-      const aExact = a.item.toLowerCase().startsWith(q) ? 0 : 1
-      const bExact = b.item.toLowerCase().startsWith(q) ? 0 : 1
-      if (aExact !== bExact) return aExact - bExact
-      return a.unitId - b.unitId
-    })
-
-    setResults(found)
+    setResults(findInventoryMatches(query, configs, items))
     setSelected(0)
-    setSubmitted(false)
   }, [query, configs, items])
 
   useEffect(() => {
@@ -91,7 +46,8 @@ export default function GlobalSearch() {
       if (e.key === 'ArrowUp')   { e.preventDefault(); setSelected(s => Math.max(s - 1, 0)) }
       if (e.key === 'Enter' && query.trim()) {
         e.preventDefault()
-        setSubmitted(true)
+        navigate(`/resultado-busqueda?q=${encodeURIComponent(query.trim())}`)
+        setOpen(false)
       }
     }
     window.addEventListener('keydown', handler)
@@ -220,13 +176,11 @@ export default function GlobalSearch() {
                     <span>{results.length} resultado{results.length !== 1 ? 's' : ''}</span>
                     <span>{Object.keys(unitGroups).length} unidade{Object.keys(unitGroups).length !== 1 ? 's' : ''}</span>
                   </div>
-                  {!submitted && (
-                    <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', fontSize: 11, color: 'var(--mid)' }}>
-                      Pulsa <strong style={{ color: 'var(--light)' }}>Enter</strong> para mostrar el listado completo por unidad y ubicación.
-                    </div>
-                  )}
+                  <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', fontSize: 11, color: 'var(--mid)' }}>
+                    Pulsa <strong style={{ color: 'var(--light)' }}>Enter</strong> para abrir <strong style={{ color: 'var(--light)' }}>Resultado de búsqueda</strong>.
+                  </div>
 
-                  {(submitted ? results : results.slice(0, 40)).map((r, idx) => (
+                  {results.slice(0, 40).map((r, idx) => (
                     <button
                       key={`${r.unitId}-${r.zoneId}-${r.item}-${idx}`}
                       onClick={() => handleSelect(r.unitId)}
@@ -253,10 +207,7 @@ export default function GlobalSearch() {
                           display: 'flex', alignItems: 'center', gap: 8,
                           marginBottom: 2,
                         }}>
-                          <span style={{
-                            fontFamily: 'Barlow Condensed', fontWeight: 800, fontSize: 13,
-                            color: 'var(--fire-l)', letterSpacing: 0.6,
-                          }}>{r.unitLabel}</span>
+                          <span className="search-unit-label">{r.unitLabel}</span>
                           <span style={{ fontSize: 11, color: 'var(--mid)' }}>· {r.zone}</span>
                         </div>
                         <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--light)', lineHeight: 1.2 }}>

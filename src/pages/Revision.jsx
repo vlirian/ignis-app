@@ -111,6 +111,17 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10)
 }
 
+function getBvListIcon({ locked = false, hasUnits = true, done = false, hasIncident = false }) {
+  if (locked) return '🚫'
+  if (!hasUnits) return '⏸'
+  if (done && hasIncident) return '⚠'
+  return '🧑‍🚒'
+}
+
+function BvListIcon({ icon }) {
+  return <span>{icon}</span>
+}
+
 function dateStr(year, month, day) {
   return `${year}-${String(month + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
 }
@@ -1746,7 +1757,7 @@ function TodayPanel({ date, reportIndex, configs, bvUnits = DEFAULT_BV_UNITS, on
                 display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s',
               }}
             >
-              <span>{activeUnits.length === 0 ? '⏸' : done ? (hasIncident ? '⚠' : '✔') : partial ? '◑' : '○'}</span>
+              <BvListIcon icon={getBvListIcon({ hasUnits: activeUnits.length > 0, done, hasIncident })} />
               <span style={{ flex: 1 }}>BV{bv}</span>
               {activeUnits.length === 0
                 ? <span style={{ opacity: 0.6 }}>(sin unidades)</span>
@@ -1882,7 +1893,7 @@ function DayCell({ day, date, isToday, isFuture, isPast, isWeekend, reportIndex,
                 display: 'flex', alignItems: 'center', gap: 3,
               }}
             >
-              <span>{locked ? '🚫' : activeUnits.length === 0 ? '⏸' : done ? (hasIncident ? '⚠' : '✔') : partial ? '◑' : '○'}</span>
+              <BvListIcon icon={getBvListIcon({ locked, hasUnits: activeUnits.length > 0, done, hasIncident })} />
               <span>BV{bv}</span>
               {activeUnits.length === 0
                 ? <span style={{ opacity: 0.6 }}>(0)</span>

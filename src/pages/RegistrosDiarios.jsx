@@ -76,6 +76,8 @@ export default function RegistrosDiarios() {
   const [inventoryLog, setInventoryLog] = useState([])
   const [loadingInventoryLog, setLoadingInventoryLog] = useState(false)
   const [inventoryLogError, setInventoryLogError] = useState('')
+  const [clearingResolvedHistory, setClearingResolvedHistory] = useState(false)
+  const [clearingInventoryLog, setClearingInventoryLog] = useState(false)
 
   useEffect(() => {
     loadReports()
@@ -146,6 +148,36 @@ export default function RegistrosDiarios() {
       return
     }
     setInventoryLog(data || [])
+  }
+
+  async function clearResolvedHistory() {
+    if (!isAdmin) return
+    const ok = window.confirm('¿Borrar TODO el historial de incidencias resueltas? Esta acción no se puede deshacer.')
+    if (!ok) return
+    setClearingResolvedHistory(true)
+    const { error } = await supabase.from('incident_history').delete().neq('id', '')
+    setClearingResolvedHistory(false)
+    if (error) {
+      showToast(`No se pudo borrar historial de incidencias: ${error.message || 'error'}`, 'error')
+      return
+    }
+    showToast('Historial de incidencias reseteado a 0', 'warn')
+    await loadResolvedHistory()
+  }
+
+  async function clearInventoryLog() {
+    if (!isAdmin) return
+    const ok = window.confirm('¿Borrar TODO el registro de inventario? Esta acción no se puede deshacer.')
+    if (!ok) return
+    setClearingInventoryLog(true)
+    const { error } = await supabase.from('inventory_change_log').delete().gt('id', 0)
+    setClearingInventoryLog(false)
+    if (error) {
+      showToast(`No se pudo borrar el registro de inventario: ${error.message || 'error'}`, 'error')
+      return
+    }
+    showToast('Registro de inventario reseteado a 0', 'warn')
+    await loadInventoryLog()
   }
 
   const filtered = useMemo(() => {
@@ -376,7 +408,18 @@ export default function RegistrosDiarios() {
               Cualquier alta, baja, edición o cambio de cantidad queda guardado aquí.
             </div>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={loadInventoryLog}>↻ Recargar inventario</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button className="btn btn-ghost btn-sm" onClick={loadInventoryLog}>↻ Recargar inventario</button>
+            {isAdmin && canEdit && (
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={clearInventoryLog}
+                disabled={clearingInventoryLog}
+              >
+                {clearingInventoryLog ? 'Borrando...' : 'Borrar registro'}
+              </button>
+            )}
+          </div>
         </div>
 
         {loadingInventoryLog ? (
@@ -433,7 +476,18 @@ export default function RegistrosDiarios() {
               Aunque una incidencia ya no esté activa, queda registrada como resuelta.
             </div>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={loadResolvedHistory}>↻ Recargar historial</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button className="btn btn-ghost btn-sm" onClick={loadResolvedHistory}>↻ Recargar historial</button>
+            {isAdmin && canEdit && (
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={clearResolvedHistory}
+                disabled={clearingResolvedHistory}
+              >
+                {clearingResolvedHistory ? 'Borrando...' : 'Borrar historial'}
+              </button>
+            )}
+          </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 180px auto', gap: 10, marginBottom: 10 }}>

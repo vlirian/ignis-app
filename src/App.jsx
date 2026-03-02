@@ -16,17 +16,28 @@ import Revision from './pages/Revision'
 import RegistrosDiarios from './pages/RegistrosDiarios'
 import Administracion from './pages/Administracion'
 import InformeDiarioIncidencias from './pages/InformeDiarioIncidencias'
+import ResultadoBusqueda from './pages/ResultadoBusqueda'
+import Instalaciones from './pages/Instalaciones'
+import Jefatura from './pages/Jefatura'
+import Vehiculos from './pages/Vehiculos'
+import Novedades from './pages/Novedades'
 import { EPI, Herramientas, Sanitario, Mantenimiento, Turnos } from './pages/Placeholders'
 
 const PAGE_TITLES = {
   '/':              'Revisión Diaria',
   '/panel':         'Panel General',
   '/alertas':       'Alertas',
-  '/unidades':      'Unidades',
+  '/incidencias':   'Incidencias',
+  '/novedades':     'Novedades',
+  '/unidades':      'Material Unidades',
+  '/vehiculos':     'Vehículos',
   '/revision':      'Revisión Diaria',
   '/registros':     'Registros Diarios',
+  '/jefatura':      'Jefatura',
+  '/instalaciones': 'Instalaciones',
   '/admin':         'Administración',
   '/informe-incidencias': 'Informe diario de incidencias',
+  '/resultado-busqueda': 'Resultado de búsqueda',
   '/epi':           'EPI',
   '/herramientas':  'Herramientas',
   '/sanitario':     'Sanitario',
@@ -100,12 +111,18 @@ function AppInner() {
           <Route path="/"              element={<Revision />} />
           <Route path="/panel"         element={<Dashboard />} />
           <Route path="/alertas"       element={<Alertas />} />
+          <Route path="/incidencias"   element={<Alertas />} />
+          <Route path="/novedades"     element={<Novedades />} />
           <Route path="/unidades"      element={<UnidadesList />} />
           <Route path="/unidades/:id"  element={<UnidadDetail />} />
+          <Route path="/vehiculos"     element={<Vehiculos />} />
           <Route path="/revision"      element={<Revision />} />
           <Route path="/registros"     element={<RegistrosDiarios />} />
+          <Route path="/jefatura"      element={<Jefatura />} />
+          <Route path="/instalaciones" element={<Instalaciones />} />
           <Route path="/admin"         element={<Administracion />} />
           <Route path="/informe-incidencias" element={<InformeDiarioIncidencias />} />
+          <Route path="/resultado-busqueda" element={<ResultadoBusqueda />} />
           <Route path="/epi"           element={<EPI />} />
           <Route path="/herramientas"  element={<Herramientas />} />
           <Route path="/sanitario"     element={<Sanitario />} />
@@ -129,7 +146,7 @@ function MobileQuickNav() {
         className={({ isActive }) => `mobile-quick-item ${isActive ? 'active' : ''}`}
       >
         <span className="mobile-quick-icon">🚒</span>
-        <span className="mobile-quick-label">Unidades</span>
+        <span className="mobile-quick-label">Material</span>
       </NavLink>
       <NavLink
         to="/revision"
