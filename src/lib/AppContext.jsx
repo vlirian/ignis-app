@@ -689,32 +689,47 @@ export function AppProvider({ children }) {
   const updateQty = useCallback(async (unitId, zoneId, itemId, delta) => {
     if (!hasPermission('edit')) {
       showToast('Solo lectura: no puedes modificar cantidades', 'warn')
-      return
+      return { ok: false, error: 'read_only' }
     }
-    let newQty
-    let itemName = ''
-    let oldQty = null
-    setState(prev => {
-      const zoneItems = (prev.items[unitId][zoneId] || []).map(it => {
-        if (String(it.id) === String(itemId)) {
-          oldQty = it.qty
-          itemName = it.name
-          newQty = Math.max(0, it.qty + delta)
-          return { ...it, qty: newQty }
-        }
-        return it
-      })
-      return { ...prev, items: { ...prev.items, [unitId]: { ...prev.items[unitId], [zoneId]: zoneItems } } }
-    })
+
+    const currentZoneItems = state.items?.[unitId]?.[zoneId] || []
+    const currentItem = currentZoneItems.find(it => String(it.id) === String(itemId))
+    if (!currentItem) {
+      showToast('Error al guardar cantidad', 'error')
+      return { ok: false, error: 'item_not_found_or_qty_invalid' }
+    }
+
+    const oldQty = Number(currentItem.qty) || 0
+    const newQty = Math.max(0, oldQty + Number(delta || 0))
+    const itemName = currentItem.name || ''
+
     if (!Number.isFinite(newQty)) {
       showToast('Error al guardar cantidad', 'error')
       return { ok: false, error: 'item_not_found_or_qty_invalid' }
     }
+
     const { error } = await supabase.from('unit_items').update({ qty: newQty }).eq('id', itemId)
     if (error) {
       showToast('Error al guardar', 'error')
       return { ok: false, error: error.message || 'update_error' }
     }
+
+    setState(prev => {
+      const zoneItems = (prev.items?.[unitId]?.[zoneId] || []).map(it =>
+        String(it.id) === String(itemId) ? { ...it, qty: newQty } : it
+      )
+      return {
+        ...prev,
+        items: {
+          ...prev.items,
+          [unitId]: {
+            ...prev.items[unitId],
+            [zoneId]: zoneItems,
+          },
+        },
+      }
+    })
+
     if (!error) {
       await logInventoryChange({
         unitId,
@@ -728,7 +743,7 @@ export function AppProvider({ children }) {
       })
     }
     return { ok: true, qty: newQty }
-  }, [showToast, logInventoryChange, hasPermission])
+  }, [showToast, logInventoryChange, hasPermission, state.items])
 
   const addItem = useCallback(async (unitId, zoneId, item) => {
     if (!hasPermission('edit')) {

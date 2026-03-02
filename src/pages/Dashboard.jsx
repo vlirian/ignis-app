@@ -60,7 +60,12 @@ export default function Dashboard() {
           <div key={k.label} className="card" style={{ borderTop: `3px solid ${topColors[k.top]}`, padding: '18px 22px', position: 'relative' }}>
             <div style={{ fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--mid)', fontWeight: 700, marginBottom: 8 }}>{k.label}</div>
             <div style={{ fontFamily: 'Barlow Condensed', fontSize: 44, fontWeight: 900, color: k.color, lineHeight: 1 }}>{k.value}</div>
-            <div style={{ position: 'absolute', right: 18, top: '50%', transform: 'translateY(-50%)', fontSize: 34, opacity: 0.12 }}>{k.icon}</div>
+            <div
+              className={(k.label === 'Incidencias' || k.label === 'Artículos faltantes') && Number(k.value) > 0 ? 'kpi-icon-alert' : ''}
+              style={{ position: 'absolute', right: 18, top: '50%', transform: 'translateY(-50%)', fontSize: 34, opacity: 0.12 }}
+            >
+              {k.icon}
+            </div>
           </div>
         ))}
       </div>
@@ -123,7 +128,7 @@ export default function Dashboard() {
               return (
                 <tr key={id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/unidades/${id}`)}>
                   <td>
-                    {hasIncident && <span className="incident-beacon" />}
+                    {hasIncident && <span className="incident-beacon incident-beacon-focus" />}
                     <span style={{ fontFamily: 'Barlow Condensed', fontSize: 18, fontWeight: 800, letterSpacing: 1 }}>
                       U{String(id).padStart(2,'0')}
                     </span>

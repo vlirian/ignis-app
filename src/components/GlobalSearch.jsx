@@ -8,6 +8,7 @@ export default function GlobalSearch() {
   const [query, setQuery]     = useState('')
   const [results, setResults] = useState([])
   const [selected, setSelected] = useState(0)
+  const [submitted, setSubmitted] = useState(false)
   const inputRef = useRef(null)
   const navigate = useNavigate()
   const { configs, items } = useApp()
@@ -30,6 +31,7 @@ export default function GlobalSearch() {
       setQuery('')
       setResults([])
       setSelected(0)
+      setSubmitted(false)
     }
   }, [open])
 
@@ -77,8 +79,9 @@ export default function GlobalSearch() {
       return a.unitId - b.unitId
     })
 
-    setResults(found.slice(0, 40))
+    setResults(found)
     setSelected(0)
+    setSubmitted(false)
   }, [query, configs, items])
 
   useEffect(() => {
@@ -86,14 +89,14 @@ export default function GlobalSearch() {
     const handler = (e) => {
       if (e.key === 'ArrowDown') { e.preventDefault(); setSelected(s => Math.min(s + 1, results.length - 1)) }
       if (e.key === 'ArrowUp')   { e.preventDefault(); setSelected(s => Math.max(s - 1, 0)) }
-      if (e.key === 'Enter' && results[selected]) {
-        navigate(`/unidades/${results[selected].unitId}`)
-        setOpen(false)
+      if (e.key === 'Enter' && query.trim()) {
+        e.preventDefault()
+        setSubmitted(true)
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [open, results, selected, navigate])
+  }, [open, results, selected, navigate, query])
 
   const handleSelect = useCallback((unitId) => {
     navigate(`/unidades/${unitId}`)
@@ -217,8 +220,13 @@ export default function GlobalSearch() {
                     <span>{results.length} resultado{results.length !== 1 ? 's' : ''}</span>
                     <span>{Object.keys(unitGroups).length} unidade{Object.keys(unitGroups).length !== 1 ? 's' : ''}</span>
                   </div>
+                  {!submitted && (
+                    <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', fontSize: 11, color: 'var(--mid)' }}>
+                      Pulsa <strong style={{ color: 'var(--light)' }}>Enter</strong> para mostrar el listado completo por unidad y ubicación.
+                    </div>
+                  )}
 
-                  {results.map((r, idx) => (
+                  {(submitted ? results : results.slice(0, 40)).map((r, idx) => (
                     <button
                       key={`${r.unitId}-${r.zoneId}-${r.item}-${idx}`}
                       onClick={() => handleSelect(r.unitId)}

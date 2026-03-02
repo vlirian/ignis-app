@@ -440,11 +440,28 @@ a { text-decoration: none; color: inherit; }
   margin-right: 6px;
 }
 
+.incident-beacon-focus {
+  width: 10px;
+  height: 10px;
+  background: #ff4d3a;
+  box-shadow:
+    0 0 0 1px rgba(255, 77, 58, 0.45),
+    0 0 10px rgba(255, 77, 58, 0.9),
+    0 0 20px rgba(255, 77, 58, 0.45);
+  animation: incidentFocusPulse 0.95s ease-in-out infinite;
+}
+
 .incident-beacon-card {
   position: absolute;
   top: 10px;
   right: 10px;
   margin-right: 0;
+}
+
+.kpi-icon-alert {
+  opacity: 0.9 !important;
+  animation: kpiAlertBlink 1.05s ease-in-out infinite;
+  filter: drop-shadow(0 0 10px rgba(255, 92, 66, 0.85));
 }
 
 @keyframes incidentPulse {
@@ -462,6 +479,38 @@ a { text-decoration: none; color: inherit; }
     transform: scale(0.9);
     box-shadow: 0 0 0 0 rgba(231, 76, 60, 0);
     opacity: 0.9;
+  }
+}
+
+@keyframes incidentFocusPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow:
+      0 0 0 1px rgba(255, 77, 58, 0.45),
+      0 0 10px rgba(255, 77, 58, 0.9),
+      0 0 20px rgba(255, 77, 58, 0.45);
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 0.45;
+    box-shadow:
+      0 0 0 1px rgba(255, 77, 58, 0.2),
+      0 0 16px rgba(255, 77, 58, 1),
+      0 0 28px rgba(255, 77, 58, 0.55);
+  }
+}
+
+@keyframes kpiAlertBlink {
+  0%, 100% {
+    opacity: 0.9;
+    transform: translateY(-50%) scale(1);
+    filter: drop-shadow(0 0 6px rgba(255, 92, 66, 0.65));
+  }
+  50% {
+    opacity: 0.35;
+    transform: translateY(-50%) scale(1.18);
+    filter: drop-shadow(0 0 16px rgba(255, 92, 66, 1));
   }
 }
 
