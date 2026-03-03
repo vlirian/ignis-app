@@ -117,18 +117,33 @@ export default function Administracion() {
     loadIncidentRecipients()
   }, [isAdmin])
 
+  async function invokeAdminManageUsers(body) {
+    const { data, error } = await supabase.functions.invoke('admin-manage-users', { body })
+    if (!error) return { ok: true, data }
+
+    let detail = error?.message || 'error'
+    try {
+      const payload = await error?.context?.json?.()
+      if (payload?.error) detail = String(payload.error)
+    } catch {
+      try {
+        const txt = await error?.context?.text?.()
+        if (txt) detail = txt
+      } catch {}
+    }
+    return { ok: false, error: detail }
+  }
+
   async function loadManagedUsers() {
     setLoadingManagedUsers(true)
     setManagedUsersError('')
-    const { data, error } = await supabase.functions.invoke('admin-manage-users', {
-      body: { action: 'list_users' },
-    })
+    const res = await invokeAdminManageUsers({ action: 'list_users' })
     setLoadingManagedUsers(false)
-    if (error || !data?.ok) {
-      setManagedUsersError(error?.message || data?.error || 'No se pudo cargar usuarios')
+    if (!res.ok || !res.data?.ok) {
+      setManagedUsersError(res.error || res.data?.error || 'No se pudo cargar usuarios')
       return
     }
-    const rows = data.users || []
+    const rows = res.data.users || []
     setManagedUsers(rows)
     setUserRoleDrafts(
       Object.fromEntries(rows.map((u) => [u.email, u.role || 'lector']))
@@ -148,12 +163,10 @@ export default function Administracion() {
       return
     }
     setManagedUsersBusy(true)
-    const { data, error } = await supabase.functions.invoke('admin-manage-users', {
-      body: { action: 'create_user', email, password, role },
-    })
+    const res = await invokeAdminManageUsers({ action: 'create_user', email, password, role })
     setManagedUsersBusy(false)
-    if (error || !data?.ok) {
-      showToast(`No se pudo crear usuario: ${error?.message || data?.error || 'error'}`, 'error')
+    if (!res.ok || !res.data?.ok) {
+      showToast(`No se pudo crear usuario: ${res.error || res.data?.error || 'error'}`, 'error')
       return
     }
     showToast('Usuario creado correctamente', 'ok')
@@ -167,12 +180,10 @@ export default function Administracion() {
     const role = String(userRoleDrafts[normalized] || 'lector')
     if (!normalized) return
     setManagedUsersBusy(true)
-    const { data, error } = await supabase.functions.invoke('admin-manage-users', {
-      body: { action: 'update_role', email: normalized, role },
-    })
+    const res = await invokeAdminManageUsers({ action: 'update_role', email: normalized, role })
     setManagedUsersBusy(false)
-    if (error || !data?.ok) {
-      showToast(`No se pudo actualizar rol: ${error?.message || data?.error || 'error'}`, 'error')
+    if (!res.ok || !res.data?.ok) {
+      showToast(`No se pudo actualizar rol: ${res.error || res.data?.error || 'error'}`, 'error')
       return
     }
     showToast('Rol actualizado', 'ok')
@@ -184,12 +195,10 @@ export default function Administracion() {
     const ok = window.confirm(`Se eliminará el usuario ${user?.email}. ¿Continuar?`)
     if (!ok) return
     setManagedUsersBusy(true)
-    const { data, error } = await supabase.functions.invoke('admin-manage-users', {
-      body: { action: 'delete_user', user_id: user?.id, email: user?.email },
-    })
+    const res = await invokeAdminManageUsers({ action: 'delete_user', user_id: user?.id, email: user?.email })
     setManagedUsersBusy(false)
-    if (error || !data?.ok) {
-      showToast(`No se pudo borrar usuario: ${error?.message || data?.error || 'error'}`, 'error')
+    if (!res.ok || !res.data?.ok) {
+      showToast(`No se pudo borrar usuario: ${res.error || res.data?.error || 'error'}`, 'error')
       return
     }
     showToast('Usuario eliminado', 'ok')
