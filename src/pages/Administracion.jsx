@@ -118,7 +118,11 @@ export default function Administracion() {
   }, [isAdmin])
 
   async function invokeAdminManageUsers(body) {
-    const { data, error } = await supabase.functions.invoke('admin-manage-users', { body })
+    const token = session?.access_token || ''
+    const { data, error } = await supabase.functions.invoke('admin-manage-users', {
+      body,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
     if (!error) return { ok: true, data }
 
     let detail = error?.message || 'error'
