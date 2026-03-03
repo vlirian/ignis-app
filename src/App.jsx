@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar'
 import Toast from './components/Toast'
 import GlobalSearch from './components/GlobalSearch'
 import IncidentBanner from './components/IncidentBanner'
+import NewsBanner from './components/NewsBanner'
 import BrandLogo from './components/BrandLogo'
 import LoginPage from './pages/LoginPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
@@ -151,6 +152,7 @@ function AppInner() {
         </Routes>
       </div>
 
+      <NewsBanner />
       <IncidentBanner />
       <Toast />
       <MobileQuickNav />
