@@ -29,6 +29,12 @@ export default function Administracion() {
   const [incidentRecipientDraft, setIncidentRecipientDraft] = useState('estudiovic@gmail.com')
   const [incidentRecipientSaving, setIncidentRecipientSaving] = useState(false)
   const [incidentEmailToggleSaving, setIncidentEmailToggleSaving] = useState(false)
+  const [managedUsers, setManagedUsers] = useState([])
+  const [loadingManagedUsers, setLoadingManagedUsers] = useState(false)
+  const [managedUsersError, setManagedUsersError] = useState('')
+  const [managedUsersBusy, setManagedUsersBusy] = useState(false)
+  const [newUserForm, setNewUserForm] = useState({ email: '', password: '', role: 'lector' })
+  const [userRoleDrafts, setUserRoleDrafts] = useState({})
   const [assignmentSavingUnit, setAssignmentSavingUnit] = useState(null)
   const [materialMenuSaving, setMaterialMenuSaving] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
@@ -105,10 +111,91 @@ export default function Administracion() {
     if (!isAdmin) return
     loadRequests()
     loadRoles()
+    loadManagedUsers()
     loadReviewGroups()
     loadAccessLogs()
     loadIncidentRecipients()
   }, [isAdmin])
+
+  async function loadManagedUsers() {
+    setLoadingManagedUsers(true)
+    setManagedUsersError('')
+    const { data, error } = await supabase.functions.invoke('admin-manage-users', {
+      body: { action: 'list_users' },
+    })
+    setLoadingManagedUsers(false)
+    if (error || !data?.ok) {
+      setManagedUsersError(error?.message || data?.error || 'No se pudo cargar usuarios')
+      return
+    }
+    const rows = data.users || []
+    setManagedUsers(rows)
+    setUserRoleDrafts(
+      Object.fromEntries(rows.map((u) => [u.email, u.role || 'lector']))
+    )
+  }
+
+  async function createManagedUser() {
+    const email = String(newUserForm.email || '').trim().toLowerCase()
+    const password = String(newUserForm.password || '')
+    const role = String(newUserForm.role || 'lector')
+    if (!email) {
+      showToast('Introduce un email', 'warn')
+      return
+    }
+    if (password.length < 6) {
+      showToast('La contraseña debe tener al menos 6 caracteres', 'warn')
+      return
+    }
+    setManagedUsersBusy(true)
+    const { data, error } = await supabase.functions.invoke('admin-manage-users', {
+      body: { action: 'create_user', email, password, role },
+    })
+    setManagedUsersBusy(false)
+    if (error || !data?.ok) {
+      showToast(`No se pudo crear usuario: ${error?.message || data?.error || 'error'}`, 'error')
+      return
+    }
+    showToast('Usuario creado correctamente', 'ok')
+    setNewUserForm({ email: '', password: '', role: 'lector' })
+    await loadManagedUsers()
+    await loadRoles()
+  }
+
+  async function saveManagedUserRole(email) {
+    const normalized = String(email || '').trim().toLowerCase()
+    const role = String(userRoleDrafts[normalized] || 'lector')
+    if (!normalized) return
+    setManagedUsersBusy(true)
+    const { data, error } = await supabase.functions.invoke('admin-manage-users', {
+      body: { action: 'update_role', email: normalized, role },
+    })
+    setManagedUsersBusy(false)
+    if (error || !data?.ok) {
+      showToast(`No se pudo actualizar rol: ${error?.message || data?.error || 'error'}`, 'error')
+      return
+    }
+    showToast('Rol actualizado', 'ok')
+    await loadManagedUsers()
+    await loadRoles()
+  }
+
+  async function deleteManagedUser(user) {
+    const ok = window.confirm(`Se eliminará el usuario ${user?.email}. ¿Continuar?`)
+    if (!ok) return
+    setManagedUsersBusy(true)
+    const { data, error } = await supabase.functions.invoke('admin-manage-users', {
+      body: { action: 'delete_user', user_id: user?.id, email: user?.email },
+    })
+    setManagedUsersBusy(false)
+    if (error || !data?.ok) {
+      showToast(`No se pudo borrar usuario: ${error?.message || data?.error || 'error'}`, 'error')
+      return
+    }
+    showToast('Usuario eliminado', 'ok')
+    await loadManagedUsers()
+    await loadRoles()
+  }
 
   function groupByDateAndBombero(rows = []) {
     const map = {}
@@ -1168,6 +1255,125 @@ export default function Administracion() {
               )}
             </div>
           </>
+        )}
+      </div>
+
+      <div className="card" style={{ padding: 20, marginTop: 14 }}>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 10, color: 'var(--mid)', letterSpacing: 1.5, textTransform: 'uppercase', fontWeight: 700 }}>
+            Gestión de usuarios
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--light)', marginTop: 6 }}>
+            Crea y elimina usuarios de acceso al sistema, asignando email, contraseña y rol.
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: 12, marginBottom: 12, background: 'var(--panel)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px 170px auto', gap: 10, alignItems: 'end' }}>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Email</label>
+              <input
+                className="form-input"
+                type="email"
+                value={newUserForm.email}
+                onChange={e => setNewUserForm(p => ({ ...p, email: e.target.value }))}
+                placeholder="usuario@dominio.com"
+              />
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Contraseña</label>
+              <input
+                className="form-input"
+                type="password"
+                value={newUserForm.password}
+                onChange={e => setNewUserForm(p => ({ ...p, password: e.target.value }))}
+                placeholder="mínimo 6 caracteres"
+              />
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Rol</label>
+              <select
+                className="form-select"
+                value={newUserForm.role}
+                onChange={e => setNewUserForm(p => ({ ...p, role: e.target.value }))}
+              >
+                {ROLE_OPTIONS.map(r => <option key={`new-user-${r}`} value={r}>{r}</option>)}
+              </select>
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={createManagedUser} disabled={managedUsersBusy}>
+              Crear usuario
+            </button>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+          <button className="btn btn-ghost btn-sm" onClick={loadManagedUsers} disabled={loadingManagedUsers || managedUsersBusy}>
+            ↻ Recargar usuarios
+          </button>
+        </div>
+
+        {loadingManagedUsers ? (
+          <div style={{ color: 'var(--mid)', fontSize: 13 }}>Cargando usuarios...</div>
+        ) : managedUsersError ? (
+          <div style={{ color: 'var(--red-l)', fontSize: 13 }}>
+            Error: {managedUsersError}. Despliega la función `admin-manage-users` en Supabase.
+          </div>
+        ) : managedUsers.length === 0 ? (
+          <div style={{ color: 'var(--mid)', fontSize: 13 }}>No hay usuarios de Auth.</div>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Rol</th>
+                  <th>Creado</th>
+                  <th>Último acceso</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {managedUsers.map(u => (
+                  <tr key={u.id}>
+                    <td>{u.email}</td>
+                    <td style={{ minWidth: 180 }}>
+                      <select
+                        className="form-select"
+                        value={userRoleDrafts[u.email] || u.role || 'lector'}
+                        onChange={e => setUserRoleDrafts(prev => ({ ...prev, [u.email]: e.target.value }))}
+                      >
+                        {ROLE_OPTIONS.map(opt => <option key={`managed-${u.email}-${opt}`} value={opt}>{opt}</option>)}
+                      </select>
+                    </td>
+                    <td style={{ fontSize: 12, color: 'var(--mid)' }}>
+                      {u.created_at ? new Date(u.created_at).toLocaleString('es-ES') : '—'}
+                    </td>
+                    <td style={{ fontSize: 12, color: 'var(--mid)' }}>
+                      {u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleString('es-ES') : '—'}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          disabled={managedUsersBusy}
+                          onClick={() => saveManagedUserRole(u.email)}
+                        >
+                          Guardar rol
+                        </button>
+                        <button
+                          className="btn btn-danger btn-sm"
+                          disabled={managedUsersBusy}
+                          onClick={() => deleteManagedUser(u)}
+                        >
+                          Borrar
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
