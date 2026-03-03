@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../lib/AppContext'
 import { supabase } from '../lib/supabase'
 
@@ -31,8 +31,37 @@ export default function Administracion() {
   const [incidentEmailToggleSaving, setIncidentEmailToggleSaving] = useState(false)
   const [assignmentSavingUnit, setAssignmentSavingUnit] = useState(null)
   const [materialMenuSaving, setMaterialMenuSaving] = useState(false)
+  const [backupBusy, setBackupBusy] = useState(false)
+  const [backupCloudBusy, setBackupCloudBusy] = useState(false)
+  const [restoreBusy, setRestoreBusy] = useState(false)
+  const backupInputRef = useRef(null)
 
   const ROLE_OPTIONS = ['admin', 'operador', 'lector']
+  const BACKUP_TABLES = [
+    'unit_configs',
+    'unit_items',
+    'bv_unit_assignments',
+    'revision_reports',
+    'revision_reports_archive',
+    'unit_reviews',
+    'inventory_change_log',
+    'vehicle_incidents',
+    'installation_incidents',
+    'jefatura_incidents',
+    'news_messages',
+    'incident_email_recipients',
+    'user_roles',
+    'app_ui_settings',
+    'access_requests',
+    'access_logs',
+  ]
+  const BACKUP_ON_CONFLICT = {
+    unit_configs: 'unit_id',
+    bv_unit_assignments: 'unit_id',
+    user_roles: 'email',
+    app_ui_settings: 'key',
+    incident_email_recipients: 'email',
+  }
 
   const uniqueCount = useMemo(() => {
     const map = new Map()
@@ -497,6 +526,177 @@ export default function Administracion() {
     showToast('Todas las incidencias han sido borradas', 'ok')
   }
 
+  async function fetchAllRowsAdmin(table, pageSize = 1000) {
+    const rows = []
+    let from = 0
+    while (true) {
+      const to = from + pageSize - 1
+      const { data, error } = await supabase
+        .from(table)
+        .select('*')
+        .range(from, to)
+      if (error) throw error
+      if (!data || data.length === 0) break
+      rows.push(...data)
+      if (data.length < pageSize) break
+      from += pageSize
+    }
+    return rows
+  }
+
+  async function downloadBackup() {
+    setBackupBusy(true)
+    const warnings = []
+    const tables = {}
+    try {
+      for (const table of BACKUP_TABLES) {
+        try {
+          const rows = await fetchAllRowsAdmin(table)
+          tables[table] = rows || []
+        } catch (e) {
+          warnings.push(`${table}: ${e?.message || 'no disponible'}`)
+          tables[table] = []
+        }
+      }
+
+      const payload = {
+        app: 'ignis-app',
+        backupVersion: 1,
+        createdAt: new Date().toISOString(),
+        createdBy: session?.user?.email || null,
+        tables,
+      }
+
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `ignis-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+
+      if (warnings.length > 0) {
+        showToast(`Backup generado con avisos (${warnings.length} tabla/s)`, 'warn')
+      } else {
+        showToast('Backup generado correctamente', 'ok')
+      }
+    } catch (e) {
+      showToast(`No se pudo generar backup: ${e?.message || 'error'}`, 'error')
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
+  async function uploadBackupToCloud() {
+    setBackupCloudBusy(true)
+    const warnings = []
+    const tables = {}
+    try {
+      for (const table of BACKUP_TABLES) {
+        try {
+          const rows = await fetchAllRowsAdmin(table)
+          tables[table] = rows || []
+        } catch (e) {
+          warnings.push(`${table}: ${e?.message || 'no disponible'}`)
+          tables[table] = []
+        }
+      }
+
+      const payload = {
+        app: 'ignis-app',
+        backupVersion: 1,
+        createdAt: new Date().toISOString(),
+        createdBy: session?.user?.email || null,
+        tables,
+      }
+
+      const fileName = `backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`
+      const path = `manual/${fileName}`
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+
+      const { error } = await supabase
+        .storage
+        .from('backups')
+        .upload(path, blob, {
+          contentType: 'application/json',
+          upsert: false,
+        })
+
+      if (error) {
+        showToast(`No se pudo subir backup: ${error.message || 'error'}`, 'error')
+        setBackupCloudBusy(false)
+        return
+      }
+
+      if (warnings.length > 0) {
+        showToast(`Backup subido con avisos (${warnings.length} tabla/s): ${path}`, 'warn')
+      } else {
+        showToast(`Backup subido a Storage: ${path}`, 'ok')
+      }
+    } catch (e) {
+      showToast(`No se pudo subir backup: ${e?.message || 'error'}`, 'error')
+    } finally {
+      setBackupCloudBusy(false)
+    }
+  }
+
+  async function restoreBackupFromFile(file) {
+    if (!file) return
+    setRestoreBusy(true)
+    try {
+      const raw = await file.text()
+      const parsed = JSON.parse(raw)
+      if (!parsed || typeof parsed !== 'object' || !parsed.tables || typeof parsed.tables !== 'object') {
+        showToast('Archivo backup inválido', 'error')
+        setRestoreBusy(false)
+        return
+      }
+
+      const errors = []
+      let totalRows = 0
+      let appliedTables = 0
+
+      for (const table of BACKUP_TABLES) {
+        const rows = Array.isArray(parsed.tables?.[table]) ? parsed.tables[table] : []
+        if (rows.length === 0) continue
+        totalRows += rows.length
+        try {
+          const conflict = BACKUP_ON_CONFLICT[table] || 'id'
+          const { error } = await supabase
+            .from(table)
+            .upsert(rows, { onConflict: conflict })
+          if (error) {
+            errors.push(`${table}: ${error.message || 'error'}`)
+            continue
+          }
+          appliedTables += 1
+        } catch (e) {
+          errors.push(`${table}: ${e?.message || 'error'}`)
+        }
+      }
+
+      await loadRequests()
+      await loadRoles()
+      await loadReviewGroups()
+      await loadAccessLogs()
+      await loadIncidentRecipients()
+      await refreshRevisionIncidents()
+
+      if (errors.length > 0) {
+        showToast(`Restore parcial: ${appliedTables} tabla/s, ${errors.length} error/es`, 'warn')
+      } else {
+        showToast(`Restore completo: ${appliedTables} tabla/s, ${totalRows} registros`, 'ok')
+      }
+    } catch (e) {
+      showToast(`No se pudo restaurar backup: ${e?.message || 'error'}`, 'error')
+    } finally {
+      setRestoreBusy(false)
+      if (backupInputRef.current) backupInputRef.current.value = ''
+    }
+  }
+
   if (!isAdmin) {
     return (
       <div className="animate-in page-container">
@@ -537,6 +737,48 @@ export default function Administracion() {
             <div style={{ fontFamily: 'Barlow Condensed', fontSize: 26, fontWeight: 900, color: pendingCount > 0 ? 'var(--yellow-l)' : 'var(--green-l)' }}>{pendingCount}</div>
             <div style={{ fontSize: 11, color: 'var(--mid)' }}>Solicitudes pendientes</div>
           </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 20, marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--mid)', letterSpacing: 1.5, textTransform: 'uppercase', fontWeight: 700 }}>
+              Backup del sistema
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--light)', marginTop: 6 }}>
+              Descarga una copia de seguridad en JSON y restaura datos desde ese archivo.
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn btn-primary btn-sm" onClick={downloadBackup} disabled={backupBusy || restoreBusy}>
+              {backupBusy ? 'Generando...' : 'Descargar backup'}
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={uploadBackupToCloud}
+              disabled={backupBusy || restoreBusy || backupCloudBusy}
+            >
+              {backupCloudBusy ? 'Subiendo...' : 'Subir a nube'}
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              disabled={backupBusy || restoreBusy}
+              onClick={() => backupInputRef.current?.click()}
+            >
+              {restoreBusy ? 'Restaurando...' : 'Restaurar backup'}
+            </button>
+            <input
+              ref={backupInputRef}
+              type="file"
+              accept="application/json,.json"
+              style={{ display: 'none' }}
+              onChange={(e) => restoreBackupFromFile(e.target.files?.[0])}
+            />
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--mid)' }}>
+          Tablas incluidas: configuraciones, inventario, revisiones, incidencias, novedades, roles, solicitudes y logs.
         </div>
       </div>
 
