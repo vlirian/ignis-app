@@ -18,7 +18,7 @@ const DEFAULT_BV_UNITS = {
 
 const NAV = [
   { to: '/panel',        icon: '📊', label: 'Panel General' },
-  { to: '/novedades',    icon: '🆕', label: 'Novedades' },
+  { to: '/novedades',    icon: '🆕', label: 'Novedades', badge: 'news' },
   { to: '/incidencias',  icon: '🚨', label: 'Incidencias',   badge: 'alert' },
   { to: '/registros',    icon: '🗂️', label: 'Registros diarios' },
   { to: '/jefatura',     icon: '👨‍💼', label: 'Jefatura' },
@@ -52,6 +52,7 @@ export default function Sidebar({ open, onClose }) {
   const effectiveBvUnits = assignedBvUnits || DEFAULT_BV_UNITS
   const navItems = NAV.filter(item => !item.adminOnly || isAdmin)
   const [revisionPending, setRevisionPending] = useState(false)
+  const [newsCount, setNewsCount] = useState(0)
 
   const activeUnitIds = Object.keys(configs || {})
     .map(Number)
@@ -142,6 +143,32 @@ export default function Sidebar({ open, onClose }) {
     }
   }, [activeUnitsByBv, effectiveBvUnits])
 
+  useEffect(() => {
+    let mounted = true
+
+    async function refreshNewsCount() {
+      try {
+        const { count, error } = await supabase
+          .from('news_messages')
+          .select('*', { count: 'exact', head: true })
+        if (error) return
+        if (mounted) setNewsCount(Number(count || 0))
+      } catch {
+        // ignore
+      }
+    }
+
+    refreshNewsCount()
+    const timer = window.setInterval(refreshNewsCount, 60000)
+    const onFocus = () => refreshNewsCount()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      mounted = false
+      window.clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [])
+
   return (
     <>
       {open && <div className={styles.backdrop} onClick={onClose} />}
@@ -161,8 +188,9 @@ export default function Sidebar({ open, onClose }) {
             <NavItem
               key={item.to}
               item={item}
-              alerts={item.badge === 'alert' ? totalAlerts : 0}
+              alerts={item.badge === 'alert' ? totalAlerts : item.badge === 'news' ? newsCount : 0}
               pulse={item.badge === 'alert' ? hasActiveAlerts : false}
+              badgeType={item.badge}
               onClose={onClose}
             />
           ))}
@@ -201,7 +229,7 @@ export default function Sidebar({ open, onClose }) {
   )
 }
 
-function NavItem({ item, alerts = 0, pulse = false, reviewPending = false, onClose }) {
+function NavItem({ item, alerts = 0, pulse = false, reviewPending = false, badgeType = '', onClose }) {
   return (
     <NavLink
       to={item.to}
@@ -212,7 +240,13 @@ function NavItem({ item, alerts = 0, pulse = false, reviewPending = false, onClo
       <span className={`${styles.navIcon} ${pulse ? styles.alertPulse : ''}`}>{item.icon}</span>
       <span className={styles.navLabel}>{item.label}</span>
       {reviewPending && <span className={`${styles.pendingChip} ${styles.pendingPulse}`}>pend.</span>}
-      {alerts > 0 && <span className={`${styles.badge} ${pulse ? styles.badgePulse : ''}`}>{alerts}</span>}
+      {alerts > 0 && (
+        <span
+          className={`${styles.badge} ${pulse ? styles.badgePulse : ''} ${badgeType === 'news' ? styles.badgeNews : ''}`}
+        >
+          {alerts}
+        </span>
+      )}
     </NavLink>
   )
 }

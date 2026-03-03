@@ -88,6 +88,9 @@
   min-width: 20px;
   text-align: center;
 }
+.badgeNews {
+  background: #2563eb;
+}
 .badgePulse {
   animation: alertBadgePulse 1.15s ease-in-out infinite;
 }
