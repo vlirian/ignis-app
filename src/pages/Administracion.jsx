@@ -118,10 +118,14 @@ export default function Administracion() {
   }, [isAdmin])
 
   async function invokeAdminManageUsers(body) {
-    const token = session?.access_token || ''
+    const { data: freshSessionData } = await supabase.auth.getSession()
+    const token = freshSessionData?.session?.access_token || session?.access_token || ''
+    if (!token) {
+      return { ok: false, error: 'missing_session_token' }
+    }
     const { data, error } = await supabase.functions.invoke('admin-manage-users', {
       body,
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers: { Authorization: `Bearer ${token}` },
     })
     if (!error) return { ok: true, data }
 
