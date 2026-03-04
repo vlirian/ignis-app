@@ -1,8 +1,8 @@
-import escudoJaen from '../../escudo.png'
+import logoLeo from '../../L.E.O.png'
 
 export default function BrandLogo({
   size = 'md',
-  title = 'L.E.O.',
+  title = 'L.E.O',
   subtitle = 'Gestión de Parques — Bomberos Jaén',
   version = '',
   center = false,
@@ -10,7 +10,7 @@ export default function BrandLogo({
   return (
     <div className={`brand-logo ${center ? 'center' : ''}`}>
       <div className={`brand-logo-shield-wrap ${size}`}>
-        <img src={escudoJaen} alt="Escudo Bomberos Jaén" className="brand-logo-shield" />
+        <img src={logoLeo} alt="Logo L.E.O" className="brand-logo-shield" />
       </div>
       <div className="brand-logo-text">
         <div className="brand-logo-title">{title}</div>

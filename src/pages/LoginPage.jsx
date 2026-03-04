@@ -67,7 +67,7 @@ export default function LoginPage() {
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
           <BrandLogo
             size="lg"
-            title="L.E.O."
+            title="L.E.O"
             subtitle="Gestión de Parques — Bomberos Jaén"
             center
           />

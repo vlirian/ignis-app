@@ -66,7 +66,7 @@ function LoadingScreen() {
     }}>
       <BrandLogo
         size="md"
-        title="L.E.O."
+        title="L.E.O"
         subtitle=""
       />
       <div style={{ fontSize: 13, color: 'var(--mid)', letterSpacing: 2 }}>CARGANDO DATOS...</div>
@@ -105,7 +105,7 @@ function AppInner() {
   if (loading) return <LoadingScreen />
 
   const base  = '/' + location.pathname.split('/')[1]
-  const title = PAGE_TITLES[base] || 'L.E.O.'
+  const title = PAGE_TITLES[base] || 'L.E.O'
   const userEmail = session?.user?.email || ''
 
   return (

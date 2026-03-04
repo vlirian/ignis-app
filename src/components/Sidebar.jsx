@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase'
 import { buildZones, unitAlertLevel } from '../data/units'
 import BrandLogo from './BrandLogo'
 import styles from './Sidebar.module.css'
+import escudoJaen from '../../escudo.png'
 
 const DEFAULT_BV_UNITS = {
   1: [3, 7, 19],
@@ -234,9 +235,9 @@ export default function Sidebar({ open, onClose }) {
         <div className={styles.logo}>
           <BrandLogo
             size="sm"
-            title="L.E.O."
-            subtitle="Gestión de Parques"
-            version="v2.3"
+            title="L.E.O"
+            subtitle="Logística · Eficiencia · Optimización"
+            version="Gestión de Parques v2.4"
           />
         </div>
 
@@ -294,8 +295,14 @@ export default function Sidebar({ open, onClose }) {
         </nav>
 
         <div className={styles.footer}>
-          <div className={styles.stationName}>🏠 Parque 01 — Centro</div>
-          <div className={styles.stationSub}>Guardia: <strong>Turno A</strong></div>
+          <div className={styles.stationName} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <img
+              src={escudoJaen}
+              alt="Escudo Bomberos Jaén"
+              style={{ width: 20, height: 20, objectFit: 'contain', borderRadius: 4 }}
+            />
+            <span>Parque Bomberos Jaén</span>
+          </div>
         </div>
       </aside>
     </>

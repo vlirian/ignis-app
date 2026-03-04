@@ -1080,10 +1080,10 @@ a { text-decoration: none; color: inherit; }
 }
 
 .brand-logo-title {
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Bebas Neue', 'Barlow Condensed', sans-serif;
   font-size: 30px;
-  font-weight: 900;
-  letter-spacing: 3.5px;
+  font-weight: 400;
+  letter-spacing: 2.8px;
   background: linear-gradient(180deg, #ffb26b 0%, #ff6b1a 35%, #ff4500 68%, #ff2f00 100%);
   -webkit-background-clip: text;
   background-clip: text;

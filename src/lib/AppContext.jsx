@@ -50,6 +50,13 @@ function writeLocalUiSetting(key, enabled) {
   }
 }
 
+function readUiSettingFromMetadata(session, key, defaultValue = true) {
+  const md = session?.user?.user_metadata || {}
+  const raw = md?.[`ui_${key}`]
+  if (raw === true || raw === false) return raw
+  return defaultValue
+}
+
 function normalizeUnitId(raw) {
   const n = Number(raw)
   if (Number.isFinite(n)) return n
@@ -163,6 +170,16 @@ export function AppProvider({ children }) {
   const isAdmin = effectiveRole === 'admin' || ADMIN_EMAILS.includes(currentEmail)
   const todayDate = new Date().toISOString().slice(0, 10)
 
+  const persistUiSettingInMetadata = useCallback(async (key, enabled) => {
+    try {
+      const current = session?.user?.user_metadata || {}
+      const next = { ...current, [`ui_${key}`]: !!enabled }
+      await supabase.auth.updateUser({ data: next })
+    } catch {
+      // ignore metadata fallback errors
+    }
+  }, [session?.user?.user_metadata])
+
   const logAccessEvent = useCallback(async (type, sessionData = null, extra = {}) => {
     try {
       const s = sessionData || session
@@ -264,7 +281,10 @@ export function AppProvider({ children }) {
           setMaterialMenuEnabledState(enabled === undefined ? true : !!enabled)
           writeLocalUiSetting('material_menu', enabled === undefined ? true : !!enabled)
         } else {
-          setMaterialMenuEnabledState(readLocalUiSetting('material_menu', true))
+          const metaValue = readUiSettingFromMetadata(session, 'material_menu', true)
+          const localValue = readLocalUiSetting('material_menu', metaValue)
+          setMaterialMenuEnabledState(localValue)
+          writeLocalUiSetting('material_menu', localValue)
         }
 
         const { data: rotateRow, error: rotateErr } = await supabase
@@ -277,7 +297,10 @@ export function AppProvider({ children }) {
           setMobileRotateHintEnabledState(enabled === undefined ? true : !!enabled)
           writeLocalUiSetting('mobile_rotate_hint', enabled === undefined ? true : !!enabled)
         } else {
-          setMobileRotateHintEnabledState(readLocalUiSetting('mobile_rotate_hint', true))
+          const metaValue = readUiSettingFromMetadata(session, 'mobile_rotate_hint', true)
+          const localValue = readLocalUiSetting('mobile_rotate_hint', metaValue)
+          setMobileRotateHintEnabledState(localValue)
+          writeLocalUiSetting('mobile_rotate_hint', localValue)
         }
 
         const { data: bannersRow, error: bannersErr } = await supabase
@@ -290,12 +313,15 @@ export function AppProvider({ children }) {
           setMobileBannersEnabledState(enabled === undefined ? true : !!enabled)
           writeLocalUiSetting('mobile_banners', enabled === undefined ? true : !!enabled)
         } else {
-          setMobileBannersEnabledState(readLocalUiSetting('mobile_banners', true))
+          const metaValue = readUiSettingFromMetadata(session, 'mobile_banners', true)
+          const localValue = readLocalUiSetting('mobile_banners', metaValue)
+          setMobileBannersEnabledState(localValue)
+          writeLocalUiSetting('mobile_banners', localValue)
         }
       } catch {
-        setMaterialMenuEnabledState(readLocalUiSetting('material_menu', true))
-        setMobileRotateHintEnabledState(readLocalUiSetting('mobile_rotate_hint', true))
-        setMobileBannersEnabledState(readLocalUiSetting('mobile_banners', true))
+        setMaterialMenuEnabledState(readLocalUiSetting('material_menu', readUiSettingFromMetadata(session, 'material_menu', true)))
+        setMobileRotateHintEnabledState(readLocalUiSetting('mobile_rotate_hint', readUiSettingFromMetadata(session, 'mobile_rotate_hint', true)))
+        setMobileBannersEnabledState(readLocalUiSetting('mobile_banners', readUiSettingFromMetadata(session, 'mobile_banners', true)))
       }
 
       const { data: cfgData, error: cfgErr } = await supabase.from('unit_configs').select('*')
@@ -1068,13 +1094,14 @@ export function AppProvider({ children }) {
     if (error) {
       if (!isMissingAppUiSettingsError(error)) return { ok: false, error: error.message || 'db_error' }
       writeLocalUiSetting('material_menu', next)
+      await persistUiSettingInMetadata('material_menu', next)
       setMaterialMenuEnabledState(next)
       return { ok: true, fallback: 'local' }
     }
     writeLocalUiSetting('material_menu', next)
     setMaterialMenuEnabledState(next)
     return { ok: true }
-  }, [isAdmin, session?.user?.email])
+  }, [isAdmin, session?.user?.email, persistUiSettingInMetadata])
 
   const setMobileRotateHintEnabled = useCallback(async (enabled) => {
     if (!isAdmin) return { ok: false, error: 'not_admin' }
@@ -1089,13 +1116,14 @@ export function AppProvider({ children }) {
     if (error) {
       if (!isMissingAppUiSettingsError(error)) return { ok: false, error: error.message || 'db_error' }
       writeLocalUiSetting('mobile_rotate_hint', next)
+      await persistUiSettingInMetadata('mobile_rotate_hint', next)
       setMobileRotateHintEnabledState(next)
       return { ok: true, fallback: 'local' }
     }
     writeLocalUiSetting('mobile_rotate_hint', next)
     setMobileRotateHintEnabledState(next)
     return { ok: true }
-  }, [isAdmin, session?.user?.email])
+  }, [isAdmin, session?.user?.email, persistUiSettingInMetadata])
 
   const setMobileBannersEnabled = useCallback(async (enabled) => {
     if (!isAdmin) return { ok: false, error: 'not_admin' }
@@ -1110,13 +1138,14 @@ export function AppProvider({ children }) {
     if (error) {
       if (!isMissingAppUiSettingsError(error)) return { ok: false, error: error.message || 'db_error' }
       writeLocalUiSetting('mobile_banners', next)
+      await persistUiSettingInMetadata('mobile_banners', next)
       setMobileBannersEnabledState(next)
       return { ok: true, fallback: 'local' }
     }
     writeLocalUiSetting('mobile_banners', next)
     setMobileBannersEnabledState(next)
     return { ok: true }
-  }, [isAdmin, session?.user?.email])
+  }, [isAdmin, session?.user?.email, persistUiSettingInMetadata])
 
   return (
     <AppContext.Provider value={{
