@@ -1,7 +1,7 @@
 // Páginas en construcción — se desarrollarán en la siguiente fase
 
 export function EPI() {
-  return <ComingSoon title="🦺 EPI" desc="Gestión de Equipos de Protección Individual" />
+  return <ComingSoon title="🦺 Cuarto NBQ" desc="Gestión de material y equipos NBQ" />
 }
 
 export function Herramientas() {
@@ -9,7 +9,7 @@ export function Herramientas() {
 }
 
 export function Sanitario() {
-  return <ComingSoon title="🩺 Material Sanitario" desc="Botiquines, DEA, oxigenoterapia y más" />
+  return <ComingSoon title="🩺 Material de Rescate" desc="Inventario de material de rescate y apoyo sanitario" />
 }
 
 export function Mantenimiento() {

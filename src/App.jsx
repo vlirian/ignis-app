@@ -39,9 +39,9 @@ const PAGE_TITLES = {
   '/admin':         'Administración',
   '/informe-incidencias': 'Informe diario de incidencias',
   '/resultado-busqueda': 'Resultado de búsqueda',
-  '/epi':           'EPI',
+  '/epi':           'Cuarto NBQ',
   '/herramientas':  'Herramientas',
-  '/sanitario':     'Sanitario',
+  '/sanitario':     'Material de Rescate',
   '/mantenimiento': 'Mantenimiento',
   '/turnos':        'Turnos',
 }

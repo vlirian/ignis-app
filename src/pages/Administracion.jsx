@@ -118,26 +118,45 @@ export default function Administracion() {
   }, [isAdmin])
 
   async function invokeAdminManageUsers(body) {
-    const { data: freshSessionData } = await supabase.auth.getSession()
-    const token = freshSessionData?.session?.access_token || session?.access_token || ''
-    if (!token) {
-      return { ok: false, error: 'missing_session_token' }
+    async function readErrorDetail(error) {
+      let detail = error?.message || 'error'
+      try {
+        const payload = await error?.context?.json?.()
+        if (payload?.error) detail = String(payload.error)
+        if (payload?.message) detail = String(payload.message)
+      } catch {
+        try {
+          const txt = await error?.context?.text?.()
+          if (txt) detail = txt
+        } catch {}
+      }
+      return detail
     }
-    const { data, error } = await supabase.functions.invoke('admin-manage-users', {
-      body,
-      headers: { Authorization: `Bearer ${token}` },
-    })
+
+    async function invokeWithToken(token) {
+      return supabase.functions.invoke('admin-manage-users', {
+        body,
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    }
+
+    const { data: sessData } = await supabase.auth.getSession()
+    let token = sessData?.session?.access_token || session?.access_token || ''
+    if (!token) return { ok: false, error: 'missing_session_token' }
+
+    let { data, error } = await invokeWithToken(token)
     if (!error) return { ok: true, data }
 
-    let detail = error?.message || 'error'
-    try {
-      const payload = await error?.context?.json?.()
-      if (payload?.error) detail = String(payload.error)
-    } catch {
-      try {
-        const txt = await error?.context?.text?.()
-        if (txt) detail = txt
-      } catch {}
+    let detail = await readErrorDetail(error)
+    if (/invalid jwt|jwt expired|401/i.test(String(detail))) {
+      const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession()
+      const refreshedToken = refreshData?.session?.access_token || ''
+      if (!refreshErr && refreshedToken) {
+        token = refreshedToken
+        const retry = await invokeWithToken(token)
+        if (!retry.error) return { ok: true, data: retry.data }
+        detail = await readErrorDetail(retry.error)
+      }
     }
     return { ok: false, error: detail }
   }
@@ -893,7 +912,7 @@ export default function Administracion() {
               Menú de material
             </div>
             <div style={{ fontSize: 13, color: 'var(--light)', marginTop: 6 }}>
-              Controla si se muestra o no el apartado Material (EPI, Herramientas y Sanitario) en el sidebar.
+              Controla si se muestra o no el apartado Material (Cuarto NBQ, Material de Rescate y Herramientas) en el sidebar.
             </div>
           </div>
           <button
