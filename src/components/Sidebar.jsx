@@ -57,6 +57,7 @@ export default function Sidebar({ open, onClose }) {
   const navItems = NAV.filter(item => !item.adminOnly || isAdmin)
   const [revisionPending, setRevisionPending] = useState(false)
   const [newsCount, setNewsCount] = useState(0)
+  const [streetClosuresTodayCount, setStreetClosuresTodayCount] = useState(0)
 
   const activeUnitIds = Object.keys(configs || {})
     .map(Number)
@@ -186,6 +187,35 @@ export default function Sidebar({ open, onClose }) {
     }
   }, [])
 
+  useEffect(() => {
+    let mounted = true
+
+    async function refreshStreetClosuresCount() {
+      try {
+        const today = todayStr()
+        const { count, error } = await supabase
+          .from('street_closures')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', 'activa')
+          .eq('closure_date', today)
+        if (error) return
+        if (mounted) setStreetClosuresTodayCount(Number(count || 0))
+      } catch {
+        // ignore
+      }
+    }
+
+    refreshStreetClosuresCount()
+    const timer = window.setInterval(refreshStreetClosuresCount, 60000)
+    const onFocus = () => refreshStreetClosuresCount()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      mounted = false
+      window.clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [])
+
   return (
     <>
       {open && <div className={styles.backdrop} onClick={onClose} />}
@@ -224,7 +254,12 @@ export default function Sidebar({ open, onClose }) {
 
           <div className={styles.sectionLabel}>Callejero</div>
           {navItems.filter(i => ['/calles-cortadas-hoy', '/ruta-mas-rapida'].includes(i.to)).map(item => (
-            <NavItem key={item.to} item={item} onClose={onClose} />
+            <NavItem
+              key={item.to}
+              item={item}
+              onClose={onClose}
+              alerts={item.to === '/calles-cortadas-hoy' ? streetClosuresTodayCount : 0}
+            />
           ))}
 
           {materialMenuEnabled && (

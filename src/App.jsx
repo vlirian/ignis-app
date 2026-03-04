@@ -1,6 +1,7 @@
 import { Component, useEffect, useState } from 'react'
 import { Routes, Route, useLocation, NavLink, useNavigate } from 'react-router-dom'
 import { AppProvider, useApp } from './lib/AppContext'
+import { supabase } from './lib/supabase'
 import Sidebar from './components/Sidebar'
 import Toast from './components/Toast'
 import GlobalSearch from './components/GlobalSearch'
@@ -178,12 +179,70 @@ function AppInner() {
 function StreetTopSearch() {
   const navigate = useNavigate()
   const [street, setStreet] = useState('')
+  const [allStreets, setAllStreets] = useState([])
+  const [suggestions, setSuggestions] = useState([])
+  const [openSuggestions, setOpenSuggestions] = useState(false)
+
+  function normalizeSearchText(value) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim()
+  }
+
+  function streetLabel(st) {
+    return `${st?.via_type || ''} ${st?.name || ''}`.trim()
+  }
+
+  useEffect(() => {
+    let mounted = true
+    async function loadStreets() {
+      const { data, error } = await supabase
+        .from('jaen_streets')
+        .select('id, via_type, name')
+        .order('name', { ascending: true })
+        .limit(5000)
+      if (!mounted || error) return
+      setAllStreets(data || [])
+    }
+    loadStreets()
+    return () => { mounted = false }
+  }, [])
+
+  useEffect(() => {
+    const q = normalizeSearchText(street)
+    if (q.length < 2) {
+      setSuggestions([])
+      setOpenSuggestions(false)
+      return
+    }
+    const filtered = (allStreets || [])
+      .map((s) => {
+        const name = normalizeSearchText(s.name)
+        const label = normalizeSearchText(streetLabel(s))
+        const tokens = name.split(/\s+/).filter(Boolean)
+        let rank = 99
+        if (name.startsWith(q)) rank = 0
+        else if (label.startsWith(q)) rank = 1
+        else if (tokens.some((t) => t.startsWith(q))) rank = 2
+        else if (name.includes(q) || label.includes(q)) rank = 3
+        if (rank === 99) return null
+        return { s, rank }
+      })
+      .filter(Boolean)
+      .sort((a, b) => (a.rank - b.rank) || streetLabel(a.s).localeCompare(streetLabel(b.s)))
+      .slice(0, 18)
+      .map((x) => x.s)
+    setSuggestions(filtered)
+    setOpenSuggestions(filtered.length > 0)
+  }, [street, allStreets])
 
   const submit = (e) => {
     e.preventDefault()
     const q = street.trim()
     if (!q) return
-    navigate(`/ruta-mas-rapida?street=${encodeURIComponent(q)}`)
+    navigate(`/ruta-mas-rapida?street=${encodeURIComponent(q)}&auto=1`)
     setStreet('')
   }
 
@@ -194,9 +253,36 @@ function StreetTopSearch() {
         className="street-top-search-input"
         value={street}
         onChange={(e) => setStreet(e.target.value)}
+        onFocus={() => { if (suggestions.length > 0) setOpenSuggestions(true) }}
+        onBlur={() => setTimeout(() => setOpenSuggestions(false), 120)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && suggestions.length > 0) {
+            const best = suggestions[0]
+            if (best) setStreet(streetLabel(best))
+          }
+        }}
         placeholder="Buscar calle..."
       />
       <button type="submit" className="street-top-search-btn">Buscar</button>
+      {openSuggestions && (
+        <div className="street-top-search-suggestions">
+          {suggestions.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className="street-top-search-option"
+              onClick={() => {
+                const label = streetLabel(s)
+                setStreet(label)
+                setOpenSuggestions(false)
+                navigate(`/ruta-mas-rapida?street=${encodeURIComponent(label)}&auto=1`)
+              }}
+            >
+              {streetLabel(s)}
+            </button>
+          ))}
+        </div>
+      )}
     </form>
   )
 }
