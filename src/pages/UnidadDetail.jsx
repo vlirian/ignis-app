@@ -573,13 +573,13 @@ export default function UnidadDetail() {
         style={{
           padding: '12px 14px',
           marginBottom: 16,
-          border: '1px solid rgba(52,152,219,0.55)',
-          background: 'linear-gradient(135deg, rgba(17,40,68,0.82), rgba(20,28,40,0.96))',
-          boxShadow: '0 0 0 1px rgba(52,152,219,0.18) inset, 0 10px 24px rgba(8,18,35,0.35)',
+          border: '1px solid rgba(255,173,96,0.72)',
+          background: 'linear-gradient(135deg, rgba(75,42,19,0.85), rgba(31,25,20,0.96))',
+          boxShadow: '0 0 0 1px rgba(255,139,38,0.22) inset, 0 10px 24px rgba(0,0,0,0.32)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, color: 'var(--blue-l)', letterSpacing: 1.2, textTransform: 'uppercase', fontWeight: 800 }}>
+          <span style={{ fontSize: 11, color: 'rgba(255,206,155,0.98)', letterSpacing: 1.2, textTransform: 'uppercase', fontWeight: 800 }}>
             Buscar en esta unidad
           </span>
           <input
@@ -589,8 +589,9 @@ export default function UnidadDetail() {
             placeholder={`Ej: manguera, extintor, ${selectedZone ? 'solo zona seleccionada' : 'cualquier zona'}...`}
             style={{
               maxWidth: 460,
-              background: 'rgba(255,163,82,0.16)',
-              border: '1px solid rgba(255,173,96,0.55)',
+              background: 'linear-gradient(135deg, rgba(255,167,95,0.24), rgba(255,128,46,0.2))',
+              border: '1px solid rgba(255,189,128,0.82)',
+              boxShadow: '0 0 0 1px rgba(255,141,41,0.18) inset',
               color: 'var(--white)',
             }}
           />
@@ -598,7 +599,7 @@ export default function UnidadDetail() {
             <button
               className="btn btn-ghost btn-sm"
               onClick={() => setUnitSearch('')}
-              style={{ borderColor: 'rgba(124,197,255,0.45)', color: 'var(--blue-l)' }}
+              style={{ borderColor: 'rgba(255,189,128,0.65)', color: 'rgba(255,211,165,0.98)' }}
             >
               Limpiar
             </button>

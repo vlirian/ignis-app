@@ -87,20 +87,30 @@ export default function GlobalSearch() {
         onClick={() => setOpen(true)}
         style={{
           display: 'flex', alignItems: 'center', gap: 8,
-          background: 'var(--panel)', border: '1px solid var(--border2)',
+          background: 'linear-gradient(135deg, rgba(255,145,64,0.22), rgba(255,115,32,0.16))',
+          border: '1px solid rgba(255,176,104,0.82)',
+          boxShadow: '0 0 0 1px rgba(255,136,38,0.2) inset, 0 8px 20px rgba(0,0,0,0.28)',
           borderRadius: 8, padding: '6px 12px', cursor: 'pointer',
-          color: 'var(--mid)', fontSize: 13, fontFamily: 'Barlow',
+          color: 'rgba(255,245,233,0.95)', fontSize: 13, fontFamily: 'Barlow',
           transition: 'all 0.15s',
         }}
-        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border2)'; e.currentTarget.style.color = 'var(--light)' }}
-        onMouseLeave={e => { e.currentTarget.style.borderColor = ''; e.currentTarget.style.color = '' }}
+        onMouseEnter={e => {
+          e.currentTarget.style.borderColor = 'rgba(255,197,138,0.95)'
+          e.currentTarget.style.boxShadow = '0 0 0 1px rgba(255,151,55,0.38) inset, 0 12px 26px rgba(0,0,0,0.34)'
+          e.currentTarget.style.color = 'var(--white)'
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.borderColor = 'rgba(255,176,104,0.82)'
+          e.currentTarget.style.boxShadow = '0 0 0 1px rgba(255,136,38,0.2) inset, 0 8px 20px rgba(0,0,0,0.28)'
+          e.currentTarget.style.color = 'rgba(255,245,233,0.95)'
+        }}
       >
         <span style={{ fontSize: 15 }}>🔍</span>
         <span style={{ flex: 1, textAlign: 'left' }}>Buscar material...</span>
         <kbd className="global-search-kbd" style={{
-          background: 'var(--border)', border: '1px solid var(--border2)',
+          background: 'rgba(18,12,8,0.48)', border: '1px solid rgba(255,184,118,0.65)',
           borderRadius: 4, padding: '1px 5px', fontSize: 10,
-          color: 'var(--mid)', fontFamily: 'monospace',
+          color: 'rgba(255,236,216,0.95)', fontFamily: 'monospace',
         }}>⌘K</kbd>
       </button>
 
@@ -133,8 +143,9 @@ export default function GlobalSearch() {
                 placeholder="Buscar material en todas las unidades..."
                 style={{
                   flex: 1,
-                  background: 'rgba(255,163,82,0.18)',
-                  border: '1px solid rgba(255,173,96,0.55)',
+                  background: 'linear-gradient(135deg, rgba(255,167,95,0.24), rgba(255,128,46,0.2))',
+                  border: '1px solid rgba(255,189,128,0.82)',
+                  boxShadow: '0 0 0 1px rgba(255,141,41,0.18) inset',
                   borderRadius: 8,
                   outline: 'none',
                   color: 'var(--white)',
