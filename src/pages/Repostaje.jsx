@@ -249,7 +249,7 @@ export default function Repostaje() {
       </div>
 
       <form className="card" style={{ padding: 16, marginBottom: 16 }} onSubmit={saveRefuel}>
-        <div style={{ display: 'grid', gridTemplateColumns: '200px 260px 1fr', gap: 10 }}>
+        <div className="repostaje-form-grid" style={{ display: 'grid', gridTemplateColumns: '200px 260px 1fr', gap: 10 }}>
           <div className="form-group" style={{ marginBottom: 0 }}>
             <label className="form-label">Vehículo</label>
             <select className="form-select" value={form.unit_id} onChange={e => setForm(p => ({ ...p, unit_id: e.target.value }))}>

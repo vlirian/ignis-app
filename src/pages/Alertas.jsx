@@ -23,7 +23,9 @@ export default function Alertas() {
   const [materialForm, setMaterialForm] = useState({ unitId: '', zoneId: '', itemId: '', note: '', mode: 'missing' })
   const [materialFiles, setMaterialFiles] = useState([])
   const [vehicleForm, setVehicleForm] = useState({ unitId: '', title: '', description: '', severity: 'media' })
+  const [vehicleFiles, setVehicleFiles] = useState([])
   const [installationForm, setInstallationForm] = useState({ title: '', location: '', description: '', severity: 'media' })
+  const [installationFiles, setInstallationFiles] = useState([])
 
   useEffect(() => {
     loadInstallationIncidents()
@@ -31,25 +33,55 @@ export default function Alertas() {
   }, [])
 
   async function loadInstallationIncidents() {
-    const { data, error } = await supabase
+    let res = await supabase
       .from('installation_incidents')
-      .select('id, created_at, title, location, description, severity, status, reported_by')
+      .select('id, created_at, title, location, description, severity, status, reported_by, photo_urls')
       .eq('status', 'activa')
       .order('created_at', { ascending: false })
       .limit(200)
-    if (error) return
-    setInstallationIncidents(data || [])
+    if (res.error && String(res.error.message || '').toLowerCase().includes('photo_urls')) {
+      res = await supabase
+        .from('installation_incidents')
+        .select('id, created_at, title, location, description, severity, status, reported_by')
+        .eq('status', 'activa')
+        .order('created_at', { ascending: false })
+        .limit(200)
+    }
+    if (res.error) return
+    setInstallationIncidents(res.data || [])
   }
 
   async function loadVehicleIncidents() {
-    const { data, error } = await supabase
+    let res = await supabase
       .from('vehicle_incidents')
-      .select('id, created_at, unit_id, title, description, severity, status, reported_by')
+      .select('id, created_at, unit_id, title, description, severity, status, reported_by, photo_urls')
       .eq('status', 'activa')
       .order('created_at', { ascending: false })
       .limit(200)
-    if (error) return
-    setVehicleIncidents(data || [])
+    if (res.error && String(res.error.message || '').toLowerCase().includes('photo_urls')) {
+      res = await supabase
+        .from('vehicle_incidents')
+        .select('id, created_at, unit_id, title, description, severity, status, reported_by')
+        .eq('status', 'activa')
+        .order('created_at', { ascending: false })
+        .limit(200)
+    }
+    if (res.error) return
+    setVehicleIncidents(res.data || [])
+  }
+
+  async function uploadIncidentFiles(files, kind, unitId = null) {
+    const urls = []
+    for (const file of files || []) {
+      const ext = String(file.name || '').includes('.') ? String(file.name).split('.').pop() : 'jpg'
+      const unitPart = Number.isFinite(Number(unitId)) ? String(unitId) : 'general'
+      const path = `incidencias/${kind}/${unitPart}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+      const { error: uploadErr } = await supabase.storage.from('revision-observaciones').upload(path, file, { upsert: false })
+      if (uploadErr) return { ok: false, error: uploadErr.message || 'upload_error' }
+      const { data: pub } = supabase.storage.from('revision-observaciones').getPublicUrl(path)
+      if (pub?.publicUrl) urls.push(pub.publicUrl)
+    }
+    return { ok: true, urls }
   }
 
   const resolveMaterialItemMeta = (alert) => {
@@ -166,12 +198,19 @@ export default function Alertas() {
     }
 
     setCreating(true)
+    const up = await uploadIncidentFiles(vehicleFiles, 'vehiculos', unitId)
+    if (!up.ok) {
+      setCreating(false)
+      showToast(`No se pudo subir foto: ${up.error}`, 'error')
+      return
+    }
     const { error } = await supabase
       .from('vehicle_incidents')
       .insert({
         unit_id: unitId,
         title,
         description: vehicleForm.description.trim() || null,
+        photo_urls: up.urls,
         severity: vehicleForm.severity,
         status: 'activa',
         reported_by: session?.user?.email || null,
@@ -182,6 +221,7 @@ export default function Alertas() {
       return
     }
     setVehicleForm({ unitId: '', title: '', description: '', severity: 'media' })
+    setVehicleFiles([])
     await loadVehicleIncidents()
     showToast('Incidencia de vehículo creada', 'ok')
   }
@@ -208,12 +248,19 @@ export default function Alertas() {
     }
 
     setCreating(true)
+    const up = await uploadIncidentFiles(installationFiles, 'instalaciones')
+    if (!up.ok) {
+      setCreating(false)
+      showToast(`No se pudo subir foto: ${up.error}`, 'error')
+      return
+    }
     const { error } = await supabase
       .from('installation_incidents')
       .insert({
         title,
         location: location || null,
         description: installationForm.description.trim() || null,
+        photo_urls: up.urls,
         severity: installationForm.severity,
         status: 'activa',
         reported_by: session?.user?.email || null,
@@ -224,6 +271,7 @@ export default function Alertas() {
       return
     }
     setInstallationForm({ title: '', location: '', description: '', severity: 'media' })
+    setInstallationFiles([])
     await loadInstallationIncidents()
     showToast('Incidencia de instalaciones creada', 'ok')
   }
@@ -351,7 +399,10 @@ export default function Alertas() {
   const openIssuePhoto = (alert) => {
     const urls = (alert.photoUrls || []).filter(Boolean)
     if (!urls.length) return
-    setPhotoViewer({ urls, index: 0, title: `U${String(alert.unitId).padStart(2, '0')} · ${alert.item}` })
+    const title = Number.isFinite(Number(alert.unitId))
+      ? `U${String(alert.unitId).padStart(2, '0')} · ${alert.item}`
+      : `${alert.zone || 'Instalaciones'} · ${alert.item}`
+    setPhotoViewer({ urls, index: 0, title })
   }
 
   const onIssueRowClick = (alert) => {
@@ -390,7 +441,7 @@ export default function Alertas() {
       source: 'vehiculos',
       reportDate: r.created_at ? String(r.created_at).slice(0, 10) : null,
       createdAt: r.created_at || null,
-      photoUrls: [],
+      photoUrls: Array.isArray(r.photo_urls) ? r.photo_urls.filter(Boolean) : [],
       incidentType: 'vehiculos',
     }))
     return list.sort((a, b) => {
@@ -417,7 +468,7 @@ export default function Alertas() {
       source: 'instalaciones',
       reportDate: r.created_at ? String(r.created_at).slice(0, 10) : null,
       createdAt: r.created_at || null,
-      photoUrls: [],
+      photoUrls: Array.isArray(r.photo_urls) ? r.photo_urls.filter(Boolean) : [],
       incidentType: 'instalaciones',
     }))
     return list.sort((a, b) => {
@@ -459,7 +510,7 @@ export default function Alertas() {
     <div className="animate-in page-container">
 
       {/* Selector principal por tipo de incidencia */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
+      <div className="incidents-category-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
         {[
           { key: 'material', icon: '🧰', label: 'Incidencias de material', count: categoryCounts.material, tone: 'var(--fire)' },
           { key: 'vehiculos', icon: '🚒', label: 'Incidencias de vehículos', count: categoryCounts.vehiculos, tone: '#38bdf8' },
@@ -498,7 +549,7 @@ export default function Alertas() {
       </div>
 
       <form className="card" style={{ padding: 16, marginBottom: 16 }} onSubmit={handleCreateIncident}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+        <div className="incidents-create-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
           <div className="card-title">➕ Crear incidencia desde esta pestaña</div>
           <div style={{ display: 'flex', gap: 6 }}>
             <button type="button" className={`btn btn-sm ${createType === 'material' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setCreateType('material')}>🧰 Material</button>
@@ -509,7 +560,7 @@ export default function Alertas() {
 
         {createType === 'material' && (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 1fr', gap: 10 }}>
+            <div className="incidents-material-grid" style={{ display: 'grid', gridTemplateColumns: '180px 1fr 1fr', gap: 10 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">Unidad</label>
                 <select className="form-select" value={materialForm.unitId} onChange={e => setMaterialForm(p => ({ ...p, unitId: e.target.value, zoneId: '', itemId: '' }))}>
@@ -542,7 +593,7 @@ export default function Alertas() {
                     checked={materialForm.mode === 'missing'}
                     onChange={() => setMaterialForm(p => ({ ...p, mode: 'missing', note: '' }))}
                   />
-                  No está (contador a 0)
+                  No está
                 </label>
                 <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--light)' }}>
                   <input
@@ -612,7 +663,7 @@ export default function Alertas() {
 
         {createType === 'vehiculos' && (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: '180px 2fr 180px', gap: 10 }}>
+            <div className="incidents-veh-grid" style={{ display: 'grid', gridTemplateColumns: '180px 2fr 180px', gap: 10 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">Unidad</label>
                 <select className="form-select" value={vehicleForm.unitId} onChange={e => setVehicleForm(p => ({ ...p, unitId: e.target.value }))}>
@@ -638,12 +689,52 @@ export default function Alertas() {
               <label className="form-label">Descripción</label>
               <textarea className="form-input" rows={3} value={vehicleForm.description} onChange={e => setVehicleForm(p => ({ ...p, description: e.target.value }))} placeholder="Describe la incidencia del vehículo..." />
             </div>
+            <div className="form-group" style={{ marginBottom: 0, marginTop: 10 }}>
+              <label className="form-label">Fotos (cámara o dispositivo)</label>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
+                  📷 Cámara
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []).filter(f => f?.type?.startsWith('image/'))
+                      if (!files.length) return
+                      setVehicleFiles(prev => [...prev, ...files])
+                      e.target.value = ''
+                    }}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+                <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
+                  🖼 Adjuntar
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []).filter(f => f?.type?.startsWith('image/'))
+                      if (!files.length) return
+                      setVehicleFiles(prev => [...prev, ...files])
+                      e.target.value = ''
+                    }}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+                {vehicleFiles.length > 0 && (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setVehicleFiles([])}>
+                    Limpiar fotos ({vehicleFiles.length})
+                  </button>
+                )}
+              </div>
+            </div>
           </>
         )}
 
         {createType === 'instalaciones' && (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 180px', gap: 10 }}>
+            <div className="incidents-inst-grid" style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 180px', gap: 10 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">Título</label>
                 <input className="form-input" value={installationForm.title} onChange={e => setInstallationForm(p => ({ ...p, title: e.target.value }))} placeholder="Ej: Puerta principal averiada" />
@@ -665,6 +756,46 @@ export default function Alertas() {
             <div className="form-group" style={{ marginBottom: 0, marginTop: 10 }}>
               <label className="form-label">Descripción</label>
               <textarea className="form-input" rows={3} value={installationForm.description} onChange={e => setInstallationForm(p => ({ ...p, description: e.target.value }))} placeholder="Describe la incidencia del parque/instalaciones..." />
+            </div>
+            <div className="form-group" style={{ marginBottom: 0, marginTop: 10 }}>
+              <label className="form-label">Fotos (cámara o dispositivo)</label>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
+                  📷 Cámara
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []).filter(f => f?.type?.startsWith('image/'))
+                      if (!files.length) return
+                      setInstallationFiles(prev => [...prev, ...files])
+                      e.target.value = ''
+                    }}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+                <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
+                  🖼 Adjuntar
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []).filter(f => f?.type?.startsWith('image/'))
+                      if (!files.length) return
+                      setInstallationFiles(prev => [...prev, ...files])
+                      e.target.value = ''
+                    }}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+                {installationFiles.length > 0 && (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setInstallationFiles([])}>
+                    Limpiar fotos ({installationFiles.length})
+                  </button>
+                )}
+              </div>
             </div>
           </>
         )}
@@ -843,9 +974,13 @@ export default function Alertas() {
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                          <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); if (Number.isFinite(a.unitId)) goToUnitFromAlert(a) }}>
-                            Ver unidad
-                          </button>
+                          {(a.photoUrls || []).length > 0 ? (
+                            <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); openIssuePhoto(a) }}>Ver foto</button>
+                          ) : (
+                            <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); if (Number.isFinite(a.unitId)) goToUnitFromAlert(a) }}>
+                              Ver unidad
+                            </button>
+                          )}
                           <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); removeVehicleIncident(a.id) }}>
                             Eliminar
                           </button>
@@ -888,9 +1023,14 @@ export default function Alertas() {
                         {a.reportDate ? new Date(a.reportDate + 'T12:00:00').toLocaleDateString('es-ES') : 'Sin fecha'}
                       </td>
                       <td>
-                        <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); removeInstallationIncident(a.id) }}>
-                          Eliminar
-                        </button>
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                          {(a.photoUrls || []).length > 0 && (
+                            <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); openIssuePhoto(a) }}>Ver foto</button>
+                          )}
+                          <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); removeInstallationIncident(a.id) }}>
+                            Eliminar
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

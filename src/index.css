@@ -684,6 +684,48 @@ a { text-decoration: none; color: inherit; }
     font-size: 12px;
     letter-spacing: 0.4px;
   }
+
+  .incidents-category-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .incidents-material-grid,
+  .incidents-veh-grid,
+  .incidents-inst-grid,
+  .repostaje-form-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .incidents-create-header {
+    align-items: stretch !important;
+  }
+
+  .incidents-create-header .card-title {
+    font-size: 18px;
+  }
+
+  .incidents-create-header > div:last-child {
+    width: 100%;
+    display: grid !important;
+    grid-template-columns: 1fr;
+    gap: 8px !important;
+  }
+
+  .incidents-create-header > div:last-child .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .card {
+    overflow: hidden;
+  }
+
+  .form-input,
+  .form-select {
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 .global-search-trigger {
