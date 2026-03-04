@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { useApp } from '../lib/AppContext'
 
 export default function IncidentBanner() {
   const { revisionIncidents } = useApp()
   const navigate = useNavigate()
+  const location = useLocation()
   const [expanded, setExpanded] = useState(false)
   const [dismissed, setDismissed] = useState(false)
 
@@ -18,7 +20,8 @@ export default function IncidentBanner() {
   })
   const uniqueIncidents = Array.from(dedupMap.values())
 
-  if (uniqueIncidents.length === 0 || dismissed) return null
+  const isInIncidencias = location.pathname === '/incidencias' || location.pathname === '/alertas'
+  if (uniqueIncidents.length === 0 || dismissed || isInIncidencias) return null
 
   const byUnit = uniqueIncidents.reduce((acc, inc) => {
     if (!acc[inc.unitId]) acc[inc.unitId] = []
