@@ -557,7 +557,7 @@ export default function Alertas() {
           aria-expanded={createOpen}
         >
           <span style={{ fontFamily: 'Barlow Condensed', fontSize: 19, fontWeight: 800, letterSpacing: 0.6 }}>
-            ➕ Crear incidencia desde esta pestaña
+            ➕ Añadir incidencia
           </span>
           <span className={`fold-indicator ${createOpen ? 'is-open' : ''}`}>⌄</span>
         </button>
@@ -817,7 +817,7 @@ export default function Alertas() {
 
         <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type="submit" className="btn btn-primary btn-sm" disabled={!canEdit || creating}>
-            {creating ? 'Guardando...' : '+ Crear incidencia'}
+            {creating ? 'Guardando...' : '+ Añadir incidencia'}
           </button>
         </div>
           </>
