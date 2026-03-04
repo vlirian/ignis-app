@@ -125,6 +125,8 @@ export function AppProvider({ children }) {
   const [bvUnits, setBvUnits] = useState(DEFAULT_BV_UNITS)
   const [userRole, setUserRole] = useState('lector')
   const [materialMenuEnabled, setMaterialMenuEnabledState] = useState(true)
+  const [mobileRotateHintEnabled, setMobileRotateHintEnabledState] = useState(true)
+  const [mobileBannersEnabled, setMobileBannersEnabledState] = useState(true)
   const loggedSessionIds = useRef(new Set())
   const currentEmail = (session?.user?.email || '').trim().toLowerCase()
   const effectiveRole = userRole || (ADMIN_EMAILS.includes(currentEmail) ? 'admin' : 'lector')
@@ -233,8 +235,34 @@ export function AppProvider({ children }) {
         } else {
           setMaterialMenuEnabledState(true)
         }
+
+        const { data: rotateRow, error: rotateErr } = await supabase
+          .from('app_ui_settings')
+          .select('value_json')
+          .eq('key', 'mobile_rotate_hint')
+          .maybeSingle()
+        if (!rotateErr) {
+          const enabled = rotateRow?.value_json?.enabled
+          setMobileRotateHintEnabledState(enabled === undefined ? true : !!enabled)
+        } else {
+          setMobileRotateHintEnabledState(true)
+        }
+
+        const { data: bannersRow, error: bannersErr } = await supabase
+          .from('app_ui_settings')
+          .select('value_json')
+          .eq('key', 'mobile_banners')
+          .maybeSingle()
+        if (!bannersErr) {
+          const enabled = bannersRow?.value_json?.enabled
+          setMobileBannersEnabledState(enabled === undefined ? true : !!enabled)
+        } else {
+          setMobileBannersEnabledState(true)
+        }
       } catch {
         setMaterialMenuEnabledState(true)
+        setMobileRotateHintEnabledState(true)
+        setMobileBannersEnabledState(true)
       }
 
       const { data: cfgData, error: cfgErr } = await supabase.from('unit_configs').select('*')
@@ -1009,12 +1037,44 @@ export function AppProvider({ children }) {
     return { ok: true }
   }, [isAdmin, session?.user?.email])
 
+  const setMobileRotateHintEnabled = useCallback(async (enabled) => {
+    if (!isAdmin) return { ok: false, error: 'not_admin' }
+    const next = !!enabled
+    const { error } = await supabase
+      .from('app_ui_settings')
+      .upsert({
+        key: 'mobile_rotate_hint',
+        value_json: { enabled: next },
+        updated_by: session?.user?.email || null,
+      }, { onConflict: 'key' })
+    if (error) return { ok: false, error: error.message || 'db_error' }
+    setMobileRotateHintEnabledState(next)
+    return { ok: true }
+  }, [isAdmin, session?.user?.email])
+
+  const setMobileBannersEnabled = useCallback(async (enabled) => {
+    if (!isAdmin) return { ok: false, error: 'not_admin' }
+    const next = !!enabled
+    const { error } = await supabase
+      .from('app_ui_settings')
+      .upsert({
+        key: 'mobile_banners',
+        value_json: { enabled: next },
+        updated_by: session?.user?.email || null,
+      }, { onConflict: 'key' })
+    if (error) return { ok: false, error: error.message || 'db_error' }
+    setMobileBannersEnabledState(next)
+    return { ok: true }
+  }, [isAdmin, session?.user?.email])
+
   return (
     <AppContext.Provider value={{
       session, authReady, recovering, finishRecovery, isAdmin, logout,
       role: effectiveRole, rolePermissions: ROLE_PERMISSIONS, hasPermission,
       bvUnits, assignUnitToBombero,
       materialMenuEnabled, setMaterialMenuEnabled,
+      mobileRotateHintEnabled, setMobileRotateHintEnabled,
+      mobileBannersEnabled, setMobileBannersEnabled,
       configs: state.configs, items: state.items, reviews,
       loading, toast, showToast,
       itemStates, setUnitItemState, setUnitAllItemStates,

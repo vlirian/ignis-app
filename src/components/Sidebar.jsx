@@ -27,7 +27,7 @@ const NAV = [
   { to: '/vehiculos',    icon: '🚚', label: 'Vehículos' },
   { to: '/repostaje',    icon: '⛽', label: 'Repostaje' },
   { to: '/instalaciones', icon: '🏢', label: 'Instalaciones' },
-  { to: '/calles-cortadas-hoy', icon: '🚫', label: 'Calles cortadas hoy' },
+  { to: '/calles-cortadas-hoy', icon: '⛔', label: 'Calles cortadas hoy' },
   { to: '/ruta-mas-rapida', icon: '⚡', label: 'Ruta más rápida' },
   { to: '/cambios-turno', icon: '🔄', label: 'Cambios de turno' },
   { to: '/epi',          icon: '🦺', label: 'Cuarto NBQ' },

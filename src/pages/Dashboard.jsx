@@ -9,10 +9,13 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [vehicleIncidents, setVehicleIncidents] = useState([])
   const [installationIncidents, setInstallationIncidents] = useState([])
+  const [streetClosures, setStreetClosures] = useState([])
+  const today = new Date().toISOString().slice(0, 10)
 
   useEffect(() => {
     loadVehicleIncidents()
     loadInstallationIncidents()
+    loadStreetClosures()
   }, [])
 
   async function loadVehicleIncidents() {
@@ -35,6 +38,17 @@ export default function Dashboard() {
       .limit(300)
     if (error) return
     setInstallationIncidents(data || [])
+  }
+
+  async function loadStreetClosures() {
+    const { data, error } = await supabase
+      .from('street_closures')
+      .select('id, closure_date, status, reason, jaen_streets(via_type,name)')
+      .eq('status', 'activa')
+      .order('closure_date', { ascending: false })
+      .limit(300)
+    if (error) return
+    setStreetClosures(data || [])
   }
   const activeUnitIds = Object.keys(configs || {})
     .map(Number)
@@ -97,12 +111,12 @@ export default function Dashboard() {
   const globalIncidentsMaterial = Object.values(incidentsByUnit).reduce((acc, set) => acc + set.size, 0)
   const globalIncidentsVehicles = Object.values(vehicleIncidentsByUnit).reduce((acc, n) => acc + Number(n || 0), 0)
   const globalIncidentsInstallations = installationIncidents.length
-  const globalIncidents = globalIncidentsMaterial + globalIncidentsVehicles + globalIncidentsInstallations
+  const globalIncidentsStreetClosures = streetClosures.length
+  const globalIncidents = globalIncidentsMaterial + globalIncidentsVehicles + globalIncidentsInstallations + globalIncidentsStreetClosures
+  const streetClosuresToday = streetClosures.filter(c => c.closure_date === today)
 
   const kpis = [
-    { label: 'Total artículos',   value: globalTotal,   color: 'var(--blue-l)',   top: 'info',  icon: '📦' },
-    { label: 'Completos',         value: globalTotal - globalMissing - globalLow, color: 'var(--green-l)', top: 'ok', icon: '✅' },
-    { label: 'Incidencias',       value: globalIncidents, color: 'var(--yellow-l)', top: 'warn', icon: '⚠️' },
+    { label: 'Incidencias', value: globalIncidents, color: 'var(--yellow-l)', top: 'warn', icon: '⚠️' },
     { label: 'Artículos faltantes', value: globalMissing, color: 'var(--red-l)', top: 'alert', icon: '🚨' },
   ]
 
@@ -214,6 +228,54 @@ export default function Dashboard() {
                 {inc.location ? `${inc.location} · ` : ''}{inc.title || 'Incidencia'}
               </button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Calles cortadas */}
+      {streetClosures.length > 0 && (
+        <div
+          className="card"
+          style={{
+            marginBottom: 24,
+            borderColor: 'rgba(14,165,233,0.35)',
+            background: 'linear-gradient(180deg, rgba(14,165,233,0.12), rgba(14,165,233,0.06))',
+          }}
+        >
+          <div className="card-header" style={{ borderBottom: '1px solid rgba(14,165,233,0.22)' }}>
+            <div className="card-title" style={{ color: '#38bdf8' }}>
+              🚫 Calles cortadas hoy ({streetClosuresToday.length})
+            </div>
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/calles-cortadas-hoy')}>
+              Ver callejero
+            </button>
+          </div>
+          <div style={{ padding: '8px 20px 16px', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {streetClosuresToday.slice(0, 20).map((c) => {
+              const s = c.jaen_streets || {}
+              const name = `${s.via_type || ''} ${s.name || 'Calle'}`.trim()
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => navigate('/calles-cortadas-hoy')}
+                  style={{
+                    background: 'rgba(56,189,248,0.14)',
+                    border: '1px solid rgba(56,189,248,0.45)',
+                    color: '#e0f2fe',
+                    borderRadius: 8,
+                    padding: '6px 14px',
+                    cursor: 'pointer',
+                    fontFamily: 'Barlow Condensed',
+                    fontSize: 14,
+                    fontWeight: 700,
+                    letterSpacing: 1
+                  }}
+                  title={c.reason || name}
+                >
+                  {name}
+                </button>
+              )
+            })}
           </div>
         </div>
       )}

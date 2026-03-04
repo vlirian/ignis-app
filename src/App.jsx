@@ -193,6 +193,7 @@ function MobileQuickNav() {
 }
 
 function MobileRotateHint() {
+  const { mobileRotateHintEnabled } = useApp()
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {
@@ -210,7 +211,7 @@ function MobileRotateHint() {
     }
   }, [])
 
-  if (!visible) return null
+  if (!mobileRotateHintEnabled || !visible) return null
 
   return (
     <div className="mobile-rotate-hint" aria-live="polite">

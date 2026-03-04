@@ -186,7 +186,7 @@ export default function CallesCortadasHoy() {
     <div className="animate-in page-container">
       <div className="card" style={{ padding: 16, marginBottom: 16 }}>
         <div style={{ fontFamily: 'Barlow Condensed', fontSize: 28, fontWeight: 900, letterSpacing: 1 }}>
-          🚫 Calles cortadas hoy
+          ⛔ Calles cortadas hoy
         </div>
         <div style={{ color: 'var(--mid)', fontSize: 13, marginTop: 4 }}>
           Busca una calle del callejero oficial de Jaén y regístrala como cortada para hoy.

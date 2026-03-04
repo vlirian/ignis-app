@@ -4,11 +4,12 @@ import { useLocation } from 'react-router-dom'
 import { useApp } from '../lib/AppContext'
 
 export default function IncidentBanner() {
-  const { revisionIncidents, session } = useApp()
+  const { revisionIncidents, session, mobileBannersEnabled } = useApp()
   const navigate = useNavigate()
   const location = useLocation()
   const [expanded, setExpanded] = useState(false)
   const [dismissed, setDismissed] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
   const identity = session?.user?.id || session?.user?.email || 'anon'
   const dismissKey = `ignis:incidents:dismissed:${identity}`
   const dismissCountKey = `ignis:incidents:dismissed-count:${identity}`
@@ -20,6 +21,13 @@ export default function IncidentBanner() {
       setDismissed(false)
     }
   }, [dismissKey])
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.matchMedia('(max-width: 900px)').matches)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
 
   function dismissForSession() {
     setDismissed(true)
@@ -57,6 +65,7 @@ export default function IncidentBanner() {
   }, [isInIncidencias])
 
   if (uniqueIncidents.length === 0 || dismissed || isInIncidencias) return null
+  if (isMobile && !mobileBannersEnabled) return null
 
   const byUnit = uniqueIncidents.reduce((acc, inc) => {
     if (!acc[inc.unitId]) acc[inc.unitId] = []

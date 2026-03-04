@@ -12,13 +12,14 @@ function priorityLabel(priority) {
 }
 
 export default function NewsBanner() {
-  const { session, revisionIncidents } = useApp()
+  const { session, revisionIncidents, mobileBannersEnabled } = useApp()
   const navigate = useNavigate()
   const location = useLocation()
   const [expanded, setExpanded] = useState(false)
   const [dismissed, setDismissed] = useState(false)
   const [incidentDismissed, setIncidentDismissed] = useState(false)
   const [rows, setRows] = useState([])
+  const [isMobile, setIsMobile] = useState(false)
   const identity = session?.user?.id || session?.user?.email || 'anon'
   const dismissKey = `ignis:news:dismissed:${identity}`
   const dismissCountKey = `ignis:news:dismissed-count:${identity}`
@@ -31,6 +32,13 @@ export default function NewsBanner() {
       setDismissed(false)
     }
   }, [dismissKey])
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.matchMedia('(max-width: 900px)').matches)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
 
   useEffect(() => {
     try {
@@ -124,6 +132,7 @@ export default function NewsBanner() {
   }, [total, dismissCountKey, dismissKey])
 
   if (total === 0 || dismissed || isInNovedades) return null
+  if (isMobile && !mobileBannersEnabled) return null
 
   return (
     <div

@@ -3,7 +3,24 @@ import { useApp } from '../lib/AppContext'
 import { supabase } from '../lib/supabase'
 
 export default function Administracion() {
-  const { isAdmin, session, revisionIncidents, clearAllIncidents, showToast, role, refreshRevisionIncidents, configs, bvUnits: assignedBvUnits, assignUnitToBombero, materialMenuEnabled, setMaterialMenuEnabled } = useApp()
+  const {
+    isAdmin,
+    session,
+    revisionIncidents,
+    clearAllIncidents,
+    showToast,
+    role,
+    refreshRevisionIncidents,
+    configs,
+    bvUnits: assignedBvUnits,
+    assignUnitToBombero,
+    materialMenuEnabled,
+    setMaterialMenuEnabled,
+    mobileRotateHintEnabled,
+    setMobileRotateHintEnabled,
+    mobileBannersEnabled,
+    setMobileBannersEnabled,
+  } = useApp()
   const [working, setWorking] = useState(false)
   const [requests, setRequests] = useState([])
   const [loadingRequests, setLoadingRequests] = useState(false)
@@ -37,6 +54,8 @@ export default function Administracion() {
   const [userRoleDrafts, setUserRoleDrafts] = useState({})
   const [assignmentSavingUnit, setAssignmentSavingUnit] = useState(null)
   const [materialMenuSaving, setMaterialMenuSaving] = useState(false)
+  const [mobileRotateSaving, setMobileRotateSaving] = useState(false)
+  const [mobileBannersSaving, setMobileBannersSaving] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
   const [backupCloudBusy, setBackupCloudBusy] = useState(false)
   const [restoreBusy, setRestoreBusy] = useState(false)
@@ -462,6 +481,38 @@ export default function Administracion() {
       return
     }
     showToast(materialMenuEnabled ? 'Apartado Material desactivado' : 'Apartado Material activado', 'ok')
+  }
+
+  async function toggleMobileRotateHint() {
+    setMobileRotateSaving(true)
+    const res = await setMobileRotateHintEnabled(!mobileRotateHintEnabled)
+    setMobileRotateSaving(false)
+    if (!res?.ok) {
+      showToast(`No se pudo actualizar aviso horizontal: ${res?.error || 'error'}`, 'error')
+      return
+    }
+    showToast(
+      mobileRotateHintEnabled
+        ? 'Aviso de mejor en horizontal desactivado en móviles'
+        : 'Aviso de mejor en horizontal activado en móviles',
+      'ok'
+    )
+  }
+
+  async function toggleMobileBanners() {
+    setMobileBannersSaving(true)
+    const res = await setMobileBannersEnabled(!mobileBannersEnabled)
+    setMobileBannersSaving(false)
+    if (!res?.ok) {
+      showToast(`No se pudo actualizar ventanas emergentes móviles: ${res?.error || 'error'}`, 'error')
+      return
+    }
+    showToast(
+      mobileBannersEnabled
+        ? 'Ventanas emergentes de incidencias/novedades desactivadas en móviles'
+        : 'Ventanas emergentes de incidencias/novedades activadas en móviles',
+      'ok'
+    )
   }
 
   async function loadReviewGroups() {
@@ -929,6 +980,53 @@ export default function Administracion() {
         </div>
         <div style={{ fontSize: 12, color: 'var(--mid)' }}>
           Estado actual: <strong style={{ color: 'var(--light)' }}>{materialMenuEnabled ? 'ACTIVO' : 'DESACTIVADO'}</strong>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 20, marginBottom: 14 }}>
+        <div style={{ fontSize: 10, color: 'var(--mid)', letterSpacing: 1.5, textTransform: 'uppercase', fontWeight: 700, marginBottom: 8 }}>
+          UI móvil
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 12 }}>
+          <div className="card" style={{ padding: 12, background: 'var(--panel)' }}>
+            <div style={{ fontSize: 12, color: 'var(--light)', marginBottom: 10 }}>
+              Aviso “Mejor en horizontal”
+            </div>
+            <button
+              className={`btn btn-sm ${mobileRotateHintEnabled ? 'btn-danger' : 'btn-primary'}`}
+              onClick={toggleMobileRotateHint}
+              disabled={mobileRotateSaving}
+            >
+              {mobileRotateSaving
+                ? 'Guardando...'
+                : mobileRotateHintEnabled
+                  ? 'Desactivar aviso'
+                  : 'Activar aviso'}
+            </button>
+            <div style={{ fontSize: 11, color: 'var(--mid)', marginTop: 8 }}>
+              Estado: <strong style={{ color: 'var(--light)' }}>{mobileRotateHintEnabled ? 'ACTIVO' : 'DESACTIVADO'}</strong>
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: 12, background: 'var(--panel)' }}>
+            <div style={{ fontSize: 12, color: 'var(--light)', marginBottom: 10 }}>
+              Ventanas emergentes de incidencias/novedades (móvil)
+            </div>
+            <button
+              className={`btn btn-sm ${mobileBannersEnabled ? 'btn-danger' : 'btn-primary'}`}
+              onClick={toggleMobileBanners}
+              disabled={mobileBannersSaving}
+            >
+              {mobileBannersSaving
+                ? 'Guardando...'
+                : mobileBannersEnabled
+                  ? 'Desactivar emergentes'
+                  : 'Activar emergentes'}
+            </button>
+            <div style={{ fontSize: 11, color: 'var(--mid)', marginTop: 8 }}>
+              Estado: <strong style={{ color: 'var(--light)' }}>{mobileBannersEnabled ? 'ACTIVO' : 'DESACTIVADO'}</strong>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1503,6 +1601,18 @@ export default function Administracion() {
             </table>
           </div>
         )}
+      </div>
+
+      <div className="card" style={{ padding: 20, marginTop: 14, border: '1px dashed var(--border2)' }}>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 10, color: 'var(--mid)', letterSpacing: 1.5, textTransform: 'uppercase', fontWeight: 700 }}>
+            Cuadrantes
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--light)', marginTop: 6 }}>
+            Gestión de cuadrantes del servicio (asignaciones, rotaciones y planificación).
+          </div>
+        </div>
+        <div className="chip chip-blue">🔨 En construcción</div>
       </div>
     </div>
   )
