@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import * as pdfjsLib from 'pdfjs-dist'
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../lib/AppContext'
 import { PDF_CALLES_FILES } from '../data/streetPdfsManifest'
@@ -6,6 +9,8 @@ import { PDF_CALLES_FILES } from '../data/streetPdfsManifest'
 const ORIGIN = 'Bomberos de Jaén, Avenida de Andalucía s/N, Jaén'
 const ORIGIN_COORDS = '37.77860,-3.81144'
 const STREET_PDFS_BUCKET = import.meta.env.VITE_STREET_PDFS_BUCKET || 'pdfs-calles'
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
 function normalizeSearchText(value) {
   return String(value || '')
@@ -128,6 +133,7 @@ function resolveStreetWidth(street, overrides = []) {
 
 export default function RutaMasRapida() {
   const { showToast } = useApp()
+  const [searchParams] = useSearchParams()
   const [query, setQuery] = useState('')
   const [allStreets, setAllStreets] = useState([])
   const [suggestions, setSuggestions] = useState([])
@@ -137,6 +143,9 @@ export default function RutaMasRapida() {
   const [loading, setLoading] = useState(true)
   const [calculating, setCalculating] = useState(false)
   const [result, setResult] = useState(null)
+  const [pdfText, setPdfText] = useState('')
+  const [pdfTextLoading, setPdfTextLoading] = useState(false)
+  const [prefilled, setPrefilled] = useState(false)
 
   useEffect(() => {
     loadData()
@@ -153,6 +162,58 @@ export default function RutaMasRapida() {
       .slice(0, 20)
     setSuggestions(filtered)
   }, [query, allStreets])
+
+  useEffect(() => {
+    if (prefilled || allStreets.length === 0) return
+    const streetParam = String(searchParams.get('street') || '').trim()
+    if (!streetParam) return
+    const q = normalizeSearchText(streetParam)
+    const match = allStreets.find((s) => normalizeSearchText(streetLabel(s)).startsWith(q))
+      || allStreets.find((s) => normalizeSearchText(s.name).startsWith(q))
+      || allStreets.find((s) => normalizeSearchText(streetLabel(s)).includes(q))
+
+    if (match) {
+      setSelectedStreet(match)
+      setQuery(streetLabel(match))
+      setSuggestions([])
+    } else {
+      setQuery(streetParam)
+    }
+    setPrefilled(true)
+  }, [allStreets, searchParams, prefilled])
+
+  useEffect(() => {
+    let cancelled = false
+    async function extractPdfText() {
+      const url = result?.streetPdfUrls?.resolvedUrl
+      if (!url) {
+        setPdfText('')
+        setPdfTextLoading(false)
+        return
+      }
+      setPdfTextLoading(true)
+      try {
+        const task = pdfjsLib.getDocument(url)
+        const pdf = await task.promise
+        const page = await pdf.getPage(1)
+        const content = await page.getTextContent()
+        const merged = (content.items || [])
+          .map((it) => String(it?.str || '').trim())
+          .filter(Boolean)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+        const clean = merged.length > 900 ? `${merged.slice(0, 900)}...` : merged
+        if (!cancelled) setPdfText(clean)
+      } catch (_) {
+        if (!cancelled) setPdfText('')
+      } finally {
+        if (!cancelled) setPdfTextLoading(false)
+      }
+    }
+    extractPdfText()
+    return () => { cancelled = true }
+  }, [result?.streetPdfUrls?.resolvedUrl])
 
   async function loadData() {
     setLoading(true)
@@ -389,6 +450,14 @@ export default function RutaMasRapida() {
                   No existe en Storage. Archivo esperado: <code>{result.streetPdfFile}</code>
                 </div>
               )}
+              <div className="card" style={{ padding: 14, marginBottom: 10, background: 'rgba(20,27,40,0.75)', border: '1px solid var(--border2)' }}>
+                <div style={{ fontSize: 11, color: 'var(--mid)', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 }}>
+                  Indicaciones extraídas del PDF
+                </div>
+                <div style={{ fontSize: 22, lineHeight: 1.35, fontWeight: 700, color: 'var(--light)' }}>
+                  {pdfTextLoading ? 'Extrayendo texto del PDF...' : (pdfText || 'No se pudo extraer texto de la primera página.')}
+                </div>
+              </div>
               <div style={{ width: '100%', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border2)' }}>
                 <iframe
                   title="Itinerario PDF"

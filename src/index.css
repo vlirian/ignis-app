@@ -450,6 +450,12 @@ a { text-decoration: none; color: inherit; }
   justify-content: center;
   min-width: 0;
 }
+.topbar-search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(980px, 100%);
+}
 .topbar-right {
   display: flex;
   align-items: center;
@@ -735,6 +741,53 @@ a { text-decoration: none; color: inherit; }
   min-width: 0;
 }
 
+.street-top-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 280px;
+  max-width: 360px;
+  width: 38%;
+  background: linear-gradient(135deg, rgba(42,134,255,0.2), rgba(28,103,212,0.14));
+  border: 1px solid rgba(115,184,255,0.8);
+  border-radius: 8px;
+  padding: 4px 8px;
+  box-shadow: 0 0 0 1px rgba(73,150,255,0.2) inset, 0 8px 20px rgba(0,0,0,0.28);
+}
+.street-top-search-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.street-top-search-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--white);
+  font-size: 13px;
+  font-family: 'Barlow', sans-serif;
+}
+.street-top-search-input::placeholder {
+  color: rgba(204,230,255,0.78);
+}
+.street-top-search-btn {
+  border: 1px solid rgba(133,198,255,0.82);
+  border-radius: 6px;
+  background: rgba(18,33,56,0.5);
+  color: rgba(225,243,255,0.96);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.street-top-search-btn:hover {
+  border-color: rgba(170,220,255,0.95);
+  color: #fff;
+}
+
 .mobile-rotate-hint {
   position: fixed;
   left: 50%;
@@ -772,10 +825,19 @@ a { text-decoration: none; color: inherit; }
 @media (max-width: 768px) {
   .global-search-label { display: none; }
   .global-search-kbd { display: none; }
+  .topbar-search-row {
+    width: 100%;
+    flex-wrap: wrap;
+  }
   .global-search-trigger {
     width: 100%;
     justify-content: center;
     padding: 7px 10px;
+  }
+  .street-top-search {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
   }
   .mobile-rotate-hint {
     top: 58px;

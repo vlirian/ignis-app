@@ -1,5 +1,5 @@
 import { Component, useEffect, useState } from 'react'
-import { Routes, Route, useLocation, NavLink } from 'react-router-dom'
+import { Routes, Route, useLocation, NavLink, useNavigate } from 'react-router-dom'
 import { AppProvider, useApp } from './lib/AppContext'
 import Sidebar from './components/Sidebar'
 import Toast from './components/Toast'
@@ -117,7 +117,10 @@ function AppInner() {
           </div>
 
           <div className="topbar-search-wrap">
-            <GlobalSearch />
+            <div className="topbar-search-row">
+              <GlobalSearch />
+              <StreetTopSearch />
+            </div>
           </div>
 
           <div className="topbar-right">
@@ -169,6 +172,32 @@ function AppInner() {
       <Toast />
       <MobileQuickNav />
     </div>
+  )
+}
+
+function StreetTopSearch() {
+  const navigate = useNavigate()
+  const [street, setStreet] = useState('')
+
+  const submit = (e) => {
+    e.preventDefault()
+    const q = street.trim()
+    if (!q) return
+    navigate(`/ruta-mas-rapida?street=${encodeURIComponent(q)}`)
+    setStreet('')
+  }
+
+  return (
+    <form className="street-top-search" onSubmit={submit}>
+      <span className="street-top-search-icon">🛣️</span>
+      <input
+        className="street-top-search-input"
+        value={street}
+        onChange={(e) => setStreet(e.target.value)}
+        placeholder="Buscar calle..."
+      />
+      <button type="submit" className="street-top-search-btn">Buscar</button>
+    </form>
   )
 }
 
