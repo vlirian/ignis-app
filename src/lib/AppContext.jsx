@@ -50,7 +50,7 @@ function writeLocalUiSetting(key, enabled) {
   }
 }
 
-function readUiSettingFromMetadata(session, key, defaultValue = true) {
+function readUiSettingFromMetadata(session, key, defaultValue = undefined) {
   const md = session?.user?.user_metadata || {}
   const raw = md?.[`ui_${key}`]
   if (raw === true || raw === false) return raw
@@ -281,10 +281,15 @@ export function AppProvider({ children }) {
           setMaterialMenuEnabledState(enabled === undefined ? true : !!enabled)
           writeLocalUiSetting('material_menu', enabled === undefined ? true : !!enabled)
         } else {
-          const metaValue = readUiSettingFromMetadata(session, 'material_menu', true)
-          const localValue = readLocalUiSetting('material_menu', metaValue)
-          setMaterialMenuEnabledState(localValue)
-          writeLocalUiSetting('material_menu', localValue)
+          const metaValue = readUiSettingFromMetadata(session, 'material_menu')
+          if (metaValue === true || metaValue === false) {
+            setMaterialMenuEnabledState(metaValue)
+            writeLocalUiSetting('material_menu', metaValue)
+          } else {
+            const localValue = readLocalUiSetting('material_menu', true)
+            setMaterialMenuEnabledState(localValue)
+            writeLocalUiSetting('material_menu', localValue)
+          }
         }
 
         const { data: rotateRow, error: rotateErr } = await supabase
@@ -297,10 +302,15 @@ export function AppProvider({ children }) {
           setMobileRotateHintEnabledState(enabled === undefined ? true : !!enabled)
           writeLocalUiSetting('mobile_rotate_hint', enabled === undefined ? true : !!enabled)
         } else {
-          const metaValue = readUiSettingFromMetadata(session, 'mobile_rotate_hint', true)
-          const localValue = readLocalUiSetting('mobile_rotate_hint', metaValue)
-          setMobileRotateHintEnabledState(localValue)
-          writeLocalUiSetting('mobile_rotate_hint', localValue)
+          const metaValue = readUiSettingFromMetadata(session, 'mobile_rotate_hint')
+          if (metaValue === true || metaValue === false) {
+            setMobileRotateHintEnabledState(metaValue)
+            writeLocalUiSetting('mobile_rotate_hint', metaValue)
+          } else {
+            const localValue = readLocalUiSetting('mobile_rotate_hint', true)
+            setMobileRotateHintEnabledState(localValue)
+            writeLocalUiSetting('mobile_rotate_hint', localValue)
+          }
         }
 
         const { data: bannersRow, error: bannersErr } = await supabase
@@ -313,15 +323,30 @@ export function AppProvider({ children }) {
           setMobileBannersEnabledState(enabled === undefined ? true : !!enabled)
           writeLocalUiSetting('mobile_banners', enabled === undefined ? true : !!enabled)
         } else {
-          const metaValue = readUiSettingFromMetadata(session, 'mobile_banners', true)
-          const localValue = readLocalUiSetting('mobile_banners', metaValue)
-          setMobileBannersEnabledState(localValue)
-          writeLocalUiSetting('mobile_banners', localValue)
+          const metaValue = readUiSettingFromMetadata(session, 'mobile_banners')
+          if (metaValue === true || metaValue === false) {
+            setMobileBannersEnabledState(metaValue)
+            writeLocalUiSetting('mobile_banners', metaValue)
+          } else {
+            const localValue = readLocalUiSetting('mobile_banners', true)
+            setMobileBannersEnabledState(localValue)
+            writeLocalUiSetting('mobile_banners', localValue)
+          }
         }
       } catch {
-        setMaterialMenuEnabledState(readLocalUiSetting('material_menu', readUiSettingFromMetadata(session, 'material_menu', true)))
-        setMobileRotateHintEnabledState(readLocalUiSetting('mobile_rotate_hint', readUiSettingFromMetadata(session, 'mobile_rotate_hint', true)))
-        setMobileBannersEnabledState(readLocalUiSetting('mobile_banners', readUiSettingFromMetadata(session, 'mobile_banners', true)))
+        const matMeta = readUiSettingFromMetadata(session, 'material_menu')
+        const rotMeta = readUiSettingFromMetadata(session, 'mobile_rotate_hint')
+        const banMeta = readUiSettingFromMetadata(session, 'mobile_banners')
+
+        setMaterialMenuEnabledState(
+          (matMeta === true || matMeta === false) ? matMeta : readLocalUiSetting('material_menu', true)
+        )
+        setMobileRotateHintEnabledState(
+          (rotMeta === true || rotMeta === false) ? rotMeta : readLocalUiSetting('mobile_rotate_hint', true)
+        )
+        setMobileBannersEnabledState(
+          (banMeta === true || banMeta === false) ? banMeta : readLocalUiSetting('mobile_banners', true)
+        )
       }
 
       const { data: cfgData, error: cfgErr } = await supabase.from('unit_configs').select('*')

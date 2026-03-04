@@ -241,6 +241,17 @@ export default function Sidebar({ open, onClose }) {
           />
         </div>
 
+        <div className={styles.footer}>
+          <div className={styles.stationName} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <img
+              src={escudoJaen}
+              alt="Escudo Bomberos Jaén"
+              style={{ width: 20, height: 20, objectFit: 'contain', borderRadius: 4 }}
+            />
+            <span>Parque Bomberos Jaén</span>
+          </div>
+        </div>
+
         <nav className={styles.nav}>
           <div className={styles.sectionLabel}>Principal</div>
           {navItems.filter(i => ['/panel', '/novedades', '/incidencias', '/registros', '/jefatura'].includes(i.to)).map(item => (
@@ -294,16 +305,6 @@ export default function Sidebar({ open, onClose }) {
           ))}
         </nav>
 
-        <div className={styles.footer}>
-          <div className={styles.stationName} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <img
-              src={escudoJaen}
-              alt="Escudo Bomberos Jaén"
-              style={{ width: 20, height: 20, objectFit: 'contain', borderRadius: 4 }}
-            />
-            <span>Parque Bomberos Jaén</span>
-          </div>
-        </div>
       </aside>
     </>
   )
