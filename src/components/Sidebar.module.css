@@ -121,8 +121,25 @@
 
 @media (max-width: 1024px) {
   .sidebar {
+    width: min(360px, 92vw);
     transform: translateX(-100%);
     box-shadow: 4px 0 24px rgba(0,0,0,0.4);
+  }
+  .logo {
+    padding: 26px 22px 18px;
+  }
+  .sectionLabel {
+    padding: 12px 24px 6px;
+    font-size: 11px;
+  }
+  .navItem {
+    padding: 13px 24px;
+    font-size: 16px;
+    gap: 13px;
+  }
+  .navIcon {
+    font-size: 21px;
+    width: 24px;
   }
   .sidebar.open { transform: translateX(0); }
   .backdrop {
@@ -131,6 +148,22 @@
     inset: 0;
     background: rgba(0,0,0,0.5);
     z-index: 99;
+  }
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    width: min(380px, 95vw);
+  }
+  .navItem {
+    font-size: 17px;
+  }
+  .sectionLabel {
+    font-size: 11px;
+  }
+  .navIcon {
+    font-size: 22px;
+    width: 25px;
   }
 }
 

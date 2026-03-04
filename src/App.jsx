@@ -24,7 +24,8 @@ import Vehiculos from './pages/Vehiculos'
 import Novedades from './pages/Novedades'
 import Repostaje from './pages/Repostaje'
 import CambiosTurno from './pages/CambiosTurno'
-import { EPI, Herramientas, Sanitario, Mantenimiento, Turnos, CallesCortadasHoy, RutaMasRapida } from './pages/Placeholders'
+import CallesCortadasHoy from './pages/CallesCortadasHoy'
+import { EPI, Herramientas, Sanitario, Mantenimiento, Turnos, RutaMasRapida } from './pages/Placeholders'
 
 const PAGE_TITLES = {
   '/':              'Revisión Diaria',
@@ -191,11 +192,40 @@ function MobileQuickNav() {
   )
 }
 
+function MobileRotateHint() {
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    const onCheck = () => {
+      const isMobile = window.matchMedia('(max-width: 900px)').matches
+      const isPortrait = window.matchMedia('(orientation: portrait)').matches
+      setVisible(isMobile && isPortrait)
+    }
+    onCheck()
+    window.addEventListener('resize', onCheck)
+    window.addEventListener('orientationchange', onCheck)
+    return () => {
+      window.removeEventListener('resize', onCheck)
+      window.removeEventListener('orientationchange', onCheck)
+    }
+  }, [])
+
+  if (!visible) return null
+
+  return (
+    <div className="mobile-rotate-hint" aria-live="polite">
+      <span className="mobile-rotate-icon">📱</span>
+      <span>Mejor visualización en horizontal</span>
+    </div>
+  )
+}
+
 export default function App() {
   return (
     <AppProvider>
       <AppErrorBoundary>
         <AppInner />
+        <MobileRotateHint />
       </AppErrorBoundary>
     </AppProvider>
   )
