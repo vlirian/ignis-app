@@ -10,6 +10,32 @@ import { PDF_CALLES_FILES } from '../data/streetPdfsManifest'
 const ORIGIN = 'Bomberos de Jaén, Avenida de Andalucía s/N, Jaén'
 const ORIGIN_COORDS = '37.77860,-3.81144'
 const STREET_PDFS_BUCKET = import.meta.env.VITE_STREET_PDFS_BUCKET || 'pdfs-calles'
+const TRAFFIC_LEGEND = [
+  {
+    key: 'fluido',
+    label: 'Azul',
+    dot: '#38bdf8',
+    text: 'Tráfico fluido. La circulación es buena y puedes ir a la velocidad normal de la vía sin problemas.',
+  },
+  {
+    key: 'moderado',
+    label: 'Naranja',
+    dot: '#f59e0b',
+    text: 'Tráfico moderado. Hay más vehículos de lo habitual y es posible que la velocidad sea un poco más lenta, pero sigues avanzando sin grandes retenciones.',
+  },
+  {
+    key: 'denso',
+    label: 'Rojo',
+    dot: '#ef4444',
+    text: 'Tráfico denso. Significa que hay atascos y probablemente sufrirás retrasos.',
+  },
+  {
+    key: 'muy-denso',
+    label: 'Rojo oscuro',
+    dot: '#7f1d1d',
+    text: 'Tráfico muy pesado, con vehículos prácticamente detenidos.',
+  },
+]
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
@@ -505,6 +531,38 @@ export default function RutaMasRapida() {
               </div>
             </div>
           )}
+
+          <div className="card" style={{ padding: 12, background: 'var(--panel)', marginTop: 12 }}>
+            <div style={{ fontSize: 11, color: 'var(--mid)', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 }}>
+              Indicaciones de tráfico (tiempo real en Google Maps)
+            </div>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {TRAFFIC_LEGEND.map((row) => (
+                <div key={row.key} className="card" style={{ padding: 10, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border2)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span
+                      aria-hidden
+                      style={{
+                        width: 11,
+                        height: 11,
+                        borderRadius: '50%',
+                        background: row.dot,
+                        boxShadow: `0 0 8px ${row.dot}`,
+                        border: '1px solid rgba(255,255,255,0.25)',
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span style={{ fontFamily: 'Barlow Condensed', fontSize: 18, fontWeight: 800, color: 'var(--white)' }}>
+                      {row.label}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--light)', lineHeight: 1.45 }}>
+                    {row.text}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
 
           <div className="card" style={{ padding: 12, background: 'var(--panel)', marginTop: 12 }}>
             <div style={{ fontSize: 11, color: 'var(--mid)', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 }}>

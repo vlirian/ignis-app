@@ -131,6 +131,62 @@ a { text-decoration: none; color: inherit; }
 
 .btn-sm { padding: 5px 11px; font-size: 12px; }
 
+.fold-toggle-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px dashed var(--border2);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+  color: var(--light);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color .18s ease, color .18s ease, background .18s ease;
+}
+.fold-toggle-btn:hover {
+  border-color: color-mix(in srgb, var(--fire) 60%, var(--border2));
+  color: var(--white);
+  background: linear-gradient(180deg, rgba(255,92,39,0.08), rgba(255,92,39,0.03));
+}
+
+@keyframes foldArrowBlink {
+  0%, 100% {
+    opacity: .55;
+    transform: translateY(0);
+    text-shadow: 0 0 0 rgba(255,92,39,0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(2px);
+    text-shadow: 0 0 10px rgba(255,92,39,.6);
+  }
+}
+
+.fold-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid var(--border2);
+  background: rgba(255,255,255,0.03);
+  color: var(--fire2);
+  font-size: 19px;
+  font-weight: 900;
+  line-height: 1;
+  animation: foldArrowBlink 1.2s ease-in-out infinite;
+  transition: transform .2s ease, color .2s ease, border-color .2s ease;
+}
+.fold-indicator.is-open {
+  animation: none;
+  transform: rotate(180deg);
+  color: var(--green-l);
+  border-color: rgba(46, 204, 113, .45);
+}
+
 @keyframes pendingSavePulse {
   0%, 100% {
     box-shadow: 0 0 0 2px rgba(151,71,255,0.45), 0 0 14px rgba(151,71,255,0.5);

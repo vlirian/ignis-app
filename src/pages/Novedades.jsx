@@ -26,6 +26,7 @@ export default function Novedades() {
   const canEdit = hasPermission('edit')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
   const [rows, setRows] = useState([])
   const [form, setForm] = useState({
     title: '',
@@ -166,47 +167,63 @@ export default function Novedades() {
       </div>
 
       <form className="card" style={{ padding: 16, marginBottom: 16 }} onSubmit={addNews}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 180px', gap: 10 }}>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Título</label>
-            <input
-              className="form-input"
-              value={form.title}
-              onChange={e => setForm(p => ({ ...p, title: e.target.value }))}
-              placeholder="Ej: Cambio de guardia / Aviso importante"
-            />
-          </div>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Prioridad</label>
-            <select
-              className="form-select"
-              value={form.priority}
-              onChange={e => setForm(p => ({ ...p, priority: Number(e.target.value) }))}
-            >
-              {PRIORITY_OPTIONS.map(p => (
-                <option key={p.value} value={p.value}>{p.label}</option>
-              ))}
-            </select>
-          </div>
-        </div>
+        <button
+          type="button"
+          className="fold-toggle-btn"
+          onClick={() => setCreateOpen(v => !v)}
+          aria-expanded={createOpen}
+        >
+          <span style={{ fontFamily: 'Barlow Condensed', fontSize: 19, fontWeight: 800, letterSpacing: 0.6 }}>
+            ➕ Crear novedad
+          </span>
+          <span className={`fold-indicator ${createOpen ? 'is-open' : ''}`}>⌄</span>
+        </button>
 
-        <div className="form-group" style={{ marginTop: 10, marginBottom: 0 }}>
-          <label className="form-label">Mensaje</label>
-          <textarea
-            className="form-input"
-            rows={4}
-            value={form.message}
-            onChange={e => setForm(p => ({ ...p, message: e.target.value }))}
-            placeholder="Escribe aquí la novedad..."
-          />
-        </div>
+        {createOpen && (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 180px', gap: 10, marginTop: 12 }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Título</label>
+                <input
+                  className="form-input"
+                  value={form.title}
+                  onChange={e => setForm(p => ({ ...p, title: e.target.value }))}
+                  placeholder="Ej: Cambio de guardia / Aviso importante"
+                />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Prioridad</label>
+                <select
+                  className="form-select"
+                  value={form.priority}
+                  onChange={e => setForm(p => ({ ...p, priority: Number(e.target.value) }))}
+                >
+                  {PRIORITY_OPTIONS.map(p => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
 
-        <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={loadNews}>↻ Recargar</button>
-          <button type="submit" className="btn btn-primary btn-sm" disabled={!canEdit || saving}>
-            {saving ? 'Guardando...' : '+ Añadir novedad'}
-          </button>
-        </div>
+            <div className="form-group" style={{ marginTop: 10, marginBottom: 0 }}>
+              <label className="form-label">Mensaje</label>
+              <textarea
+                className="form-input"
+                rows={4}
+                value={form.message}
+                onChange={e => setForm(p => ({ ...p, message: e.target.value }))}
+                placeholder="Escribe aquí la novedad..."
+              />
+            </div>
+
+            <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={loadNews}>↻ Recargar</button>
+              <button type="submit" className="btn btn-primary btn-sm" disabled={!canEdit || saving}>
+                {saving ? 'Guardando...' : '+ Añadir novedad'}
+              </button>
+            </div>
+          </>
+        )}
       </form>
 
       <div className="card" style={{ padding: 0 }}>

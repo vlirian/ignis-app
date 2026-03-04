@@ -18,6 +18,7 @@ export default function Alertas() {
   const [photoViewer, setPhotoViewer] = useState(null) // { urls: string[], index: number, title?: string }
   const [installationIncidents, setInstallationIncidents] = useState([])
   const [vehicleIncidents, setVehicleIncidents] = useState([])
+  const [createOpen, setCreateOpen] = useState(false)
   const [createType, setCreateType] = useState('material')
   const [creating, setCreating] = useState(false)
   const [materialForm, setMaterialForm] = useState({ unitId: '', zoneId: '', itemId: '', note: '', mode: 'missing' })
@@ -549,8 +550,22 @@ export default function Alertas() {
       </div>
 
       <form className="card" style={{ padding: 16, marginBottom: 16 }} onSubmit={handleCreateIncident}>
-        <div className="incidents-create-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
-          <div className="card-title">➕ Crear incidencia desde esta pestaña</div>
+        <button
+          type="button"
+          className="fold-toggle-btn"
+          onClick={() => setCreateOpen(v => !v)}
+          aria-expanded={createOpen}
+        >
+          <span style={{ fontFamily: 'Barlow Condensed', fontSize: 19, fontWeight: 800, letterSpacing: 0.6 }}>
+            ➕ Crear incidencia desde esta pestaña
+          </span>
+          <span className={`fold-indicator ${createOpen ? 'is-open' : ''}`}>⌄</span>
+        </button>
+
+        {createOpen && (
+          <>
+        <div className="incidents-create-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginTop: 12, marginBottom: 10 }}>
+          <div className="card-title">Tipo de incidencia</div>
           <div style={{ display: 'flex', gap: 6 }}>
             <button type="button" className={`btn btn-sm ${createType === 'material' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setCreateType('material')}>🧰 Material</button>
             <button type="button" className={`btn btn-sm ${createType === 'vehiculos' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setCreateType('vehiculos')}>🚒 Vehículos</button>
@@ -805,6 +820,8 @@ export default function Alertas() {
             {creating ? 'Guardando...' : '+ Crear incidencia'}
           </button>
         </div>
+          </>
+        )}
       </form>
 
       {/* Summary cards */}
