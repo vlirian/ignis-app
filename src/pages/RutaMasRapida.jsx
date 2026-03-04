@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../lib/AppContext'
-import { PDF_CALLES_FILES } from '../data/pdfsCallesManifest'
+import { PDF_CALLES_FILES } from '../data/streetPdfsManifest'
 
 const ORIGIN = 'Bomberos de Jaén, Avenida de Andalucía s/N, Jaén'
 const ORIGIN_COORDS = '37.77860,-3.81144'
