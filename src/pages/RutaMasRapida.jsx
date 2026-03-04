@@ -369,17 +369,6 @@ export default function RutaMasRapida() {
             </div>
           </div>
 
-          <div className="card" style={{ padding: 12, background: 'var(--panel)' }}>
-            <div style={{ fontSize: 11, color: 'var(--mid)', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 }}>
-              Pasos
-            </div>
-            <ol style={{ margin: 0, paddingLeft: 18, display: 'grid', gap: 6 }}>
-              {result.steps.map((step, idx) => (
-                <li key={`step-${idx}`} style={{ fontSize: 13, color: 'var(--light)' }}>{step}</li>
-              ))}
-            </ol>
-          </div>
-
           {result.streetPdfFile && (
             <div className="card" style={{ padding: 12, background: 'var(--panel)', marginTop: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
@@ -404,7 +393,7 @@ export default function RutaMasRapida() {
                 <iframe
                   title="Itinerario PDF"
                   src={result.streetPdfUrls?.resolvedUrl || result.streetPdfUrls?.publicUrl || result.streetPdfUrls?.localUrl}
-                  style={{ width: '100%', height: 440, border: 0, display: 'block' }}
+                  style={{ width: '100%', height: 680, border: 0, display: 'block' }}
                   loading="lazy"
                 />
               </div>
