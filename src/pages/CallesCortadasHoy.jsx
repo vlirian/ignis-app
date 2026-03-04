@@ -2,6 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../lib/AppContext'
 
+function normalizeSearchText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
 function streetLabel(street) {
   if (!street) return ''
   return `${street.via_type || ''} ${street.name || ''}`.trim()
@@ -15,6 +23,7 @@ export default function CallesCortadasHoy() {
   const [searching, setSearching] = useState(false)
   const [suggestions, setSuggestions] = useState([])
   const [selectedStreet, setSelectedStreet] = useState(null)
+  const [allStreets, setAllStreets] = useState([])
 
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
@@ -25,12 +34,31 @@ export default function CallesCortadasHoy() {
   const [reason, setReason] = useState('')
 
   useEffect(() => {
+    loadAllStreets()
     loadClosures()
   }, [])
 
+  async function loadAllStreets() {
+    const { data, error } = await supabase
+      .from('jaen_streets')
+      .select('id, source_code, via_type, name')
+      .order('name', { ascending: true })
+      .limit(5000)
+    if (error) {
+      const msg = String(error.message || '')
+      if (msg.includes('jaen_streets')) {
+        showToast('Falta tabla de calles: ejecuta calles-jaen.sql en Supabase', 'error')
+      } else {
+        showToast(`No se pudo cargar callejero: ${msg || 'error'}`, 'error')
+      }
+      return
+    }
+    setAllStreets(data || [])
+  }
+
   useEffect(() => {
     let canceled = false
-    const text = query.trim()
+    const text = normalizeSearchText(query)
 
     async function runSearch() {
       if (text.length < 2) {
@@ -38,26 +66,12 @@ export default function CallesCortadasHoy() {
         return
       }
       setSearching(true)
-      const { data, error } = await supabase
-        .from('jaen_streets')
-        .select('id, source_code, via_type, name')
-        .ilike('name', `%${text}%`)
-        .order('name', { ascending: true })
-        .limit(20)
       setSearching(false)
-
       if (canceled) return
-      if (error) {
-        const msg = String(error.message || '')
-        if (msg.includes('jaen_streets')) {
-          showToast('Falta tabla de calles: ejecuta calles-jaen.sql en Supabase', 'error')
-        } else {
-          showToast(`No se pudo buscar calle: ${msg || 'error'}`, 'error')
-        }
-        setSuggestions([])
-        return
-      }
-      setSuggestions(data || [])
+      const filtered = (allStreets || [])
+        .filter(s => normalizeSearchText(s.name).startsWith(text))
+        .slice(0, 20)
+      setSuggestions(filtered)
     }
 
     const t = setTimeout(runSearch, 180)
@@ -65,7 +79,7 @@ export default function CallesCortadasHoy() {
       canceled = true
       clearTimeout(t)
     }
-  }, [query, showToast])
+  }, [query, allStreets])
 
   async function loadClosures() {
     setLoading(true)
