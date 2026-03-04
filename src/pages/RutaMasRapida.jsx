@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -23,6 +23,27 @@ function normalizeSearchText(value) {
 function streetLabel(street) {
   if (!street) return ''
   return `${street.via_type || ''} ${street.name || ''}`.trim()
+}
+
+function findMatchingStreets(streets, queryText) {
+  const q = normalizeSearchText(queryText)
+  if (!q) return []
+  return (streets || [])
+    .map((s) => {
+      const name = normalizeSearchText(s.name)
+      const label = normalizeSearchText(streetLabel(s))
+      const tokens = name.split(/\s+/).filter(Boolean)
+      let rank = 99
+      if (name.startsWith(q)) rank = 0
+      else if (label.startsWith(q)) rank = 1
+      else if (tokens.some((t) => t.startsWith(q))) rank = 2
+      else if (name.includes(q) || label.includes(q)) rank = 3
+      if (rank === 99) return null
+      return { s, rank, lenDelta: Math.abs(name.length - q.length) }
+    })
+    .filter(Boolean)
+    .sort((a, b) => (a.rank - b.rank) || (a.lenDelta - b.lenDelta) || streetLabel(a.s).localeCompare(streetLabel(b.s)))
+    .map((x) => x.s)
 }
 
 function normalizeFileStem(name) {
@@ -145,7 +166,7 @@ export default function RutaMasRapida() {
   const [result, setResult] = useState(null)
   const [pdfText, setPdfText] = useState('')
   const [pdfTextLoading, setPdfTextLoading] = useState(false)
-  const [prefilled, setPrefilled] = useState(false)
+  const lastHandledSearchRef = useRef('')
 
   useEffect(() => {
     loadData()
@@ -157,30 +178,36 @@ export default function RutaMasRapida() {
       setSuggestions([])
       return
     }
-    const filtered = allStreets
-      .filter((s) => normalizeSearchText(s.name).startsWith(text))
-      .slice(0, 20)
+    const filtered = findMatchingStreets(allStreets, text).slice(0, 80)
     setSuggestions(filtered)
   }, [query, allStreets])
 
   useEffect(() => {
-    if (prefilled || allStreets.length === 0) return
+    if (allStreets.length === 0) return
     const streetParam = String(searchParams.get('street') || '').trim()
+    const auto = String(searchParams.get('auto') || '') === '1'
     if (!streetParam) return
-    const q = normalizeSearchText(streetParam)
-    const match = allStreets.find((s) => normalizeSearchText(streetLabel(s)).startsWith(q))
-      || allStreets.find((s) => normalizeSearchText(s.name).startsWith(q))
-      || allStreets.find((s) => normalizeSearchText(streetLabel(s)).includes(q))
 
+    const key = `${streetParam}|${auto ? '1' : '0'}`
+    if (lastHandledSearchRef.current === key) return
+    lastHandledSearchRef.current = key
+
+    const match = findMatchingStreets(allStreets, streetParam)[0] || null
     if (match) {
       setSelectedStreet(match)
       setQuery(streetLabel(match))
       setSuggestions([])
+      if (auto) {
+        calculateRoute(match)
+      }
     } else {
+      setSelectedStreet(null)
       setQuery(streetParam)
+      setResult(null)
+      if (auto) showToast('No se encontró una calle que coincida con la búsqueda', 'warn')
     }
-    setPrefilled(true)
-  }, [allStreets, searchParams, prefilled])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allStreets, searchParams])
 
   useEffect(() => {
     let cancelled = false
@@ -272,17 +299,18 @@ export default function RutaMasRapida() {
     return (activeClosures || []).find((c) => Number(c.street_id) === Number(selectedStreet.id)) || null
   }, [activeClosures, selectedStreet])
 
-  async function calculateRoute() {
-    if (!selectedStreet) {
+  async function calculateRoute(streetOverride = null) {
+    const targetStreet = streetOverride || selectedStreet
+    if (!targetStreet) {
       showToast('Selecciona una calle de destino', 'warn')
       return
     }
 
     setCalculating(true)
 
-    const width = resolveStreetWidth(selectedStreet, streetWidthOverrides)
-    const destination = streetLabel(selectedStreet)
-    const streetPdfFile = matchStreetPdf(selectedStreet?.name || destination)
+    const width = resolveStreetWidth(targetStreet, streetWidthOverrides)
+    const destination = streetLabel(targetStreet)
+    const streetPdfFile = matchStreetPdf(targetStreet?.name || destination)
     const streetPdfResolution = await resolveStreetPdfSource(streetPdfFile)
 
     const steps = [
@@ -296,7 +324,9 @@ export default function RutaMasRapida() {
           : 'Último tramo con anchura media: mantener precaución en cruces y estacionados.',
     ]
 
-    if (selectedClosure) {
+    const closureForTarget = (activeClosures || []).find((c) => Number(c.street_id) === Number(targetStreet.id)) || null
+
+    if (closureForTarget) {
       steps.push('ATENCIÓN: la calle destino aparece actualmente cortada en el registro diario.')
     }
 
@@ -307,8 +337,8 @@ export default function RutaMasRapida() {
       origin: ORIGIN,
       destination,
       width,
-      isClosed: Boolean(selectedClosure),
-      closureReason: selectedClosure?.reason || null,
+      isClosed: Boolean(closureForTarget),
+      closureReason: closureForTarget?.reason || null,
       steps,
       mapsUrl,
       mapsEmbedUrl,
@@ -351,6 +381,18 @@ export default function RutaMasRapida() {
                 setQuery(e.target.value)
                 setSelectedStreet(null)
                 setResult(null)
+              }}
+              onKeyDown={async (e) => {
+                if (e.key !== 'Enter') return
+                e.preventDefault()
+                const first = selectedStreet || suggestions[0] || null
+                if (!first) return
+                if (!selectedStreet) {
+                  setSelectedStreet(first)
+                  setQuery(streetLabel(first))
+                  setSuggestions([])
+                }
+                await calculateRoute(first)
               }}
               placeholder="Ej: Sierra Mágina"
             />
