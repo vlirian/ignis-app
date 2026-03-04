@@ -22,6 +22,8 @@ import Instalaciones from './pages/Instalaciones'
 import Jefatura from './pages/Jefatura'
 import Vehiculos from './pages/Vehiculos'
 import Novedades from './pages/Novedades'
+import Repostaje from './pages/Repostaje'
+import CambiosTurno from './pages/CambiosTurno'
 import { EPI, Herramientas, Sanitario, Mantenimiento, Turnos } from './pages/Placeholders'
 
 const PAGE_TITLES = {
@@ -36,6 +38,8 @@ const PAGE_TITLES = {
   '/registros':     'Registros Diarios',
   '/jefatura':      'Jefatura',
   '/instalaciones': 'Instalaciones',
+  '/repostaje': 'Repostaje',
+  '/cambios-turno': 'Cambios de turno',
   '/admin':         'Administración',
   '/informe-incidencias': 'Informe diario de incidencias',
   '/resultado-busqueda': 'Resultado de búsqueda',
@@ -141,6 +145,8 @@ function AppInner() {
           <Route path="/registros"     element={<RegistrosDiarios />} />
           <Route path="/jefatura"      element={<Jefatura />} />
           <Route path="/instalaciones" element={<Instalaciones />} />
+          <Route path="/repostaje" element={<Repostaje />} />
+          <Route path="/cambios-turno" element={<CambiosTurno />} />
           <Route path="/admin"         element={<Administracion />} />
           <Route path="/informe-incidencias" element={<InformeDiarioIncidencias />} />
           <Route path="/resultado-busqueda" element={<ResultadoBusqueda />} />

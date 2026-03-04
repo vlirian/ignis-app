@@ -21,8 +21,8 @@
 
   --sidebar-width: 220px;
   --incident-floating-bottom: 20px;
-  --incident-floating-height: 112px;
-  --news-floating-gap: 8px;
+  --incident-floating-height: 74px;
+  --news-floating-gap: 2px;
   --incident-floating-width: 420px;
   --news-floating-width: 360px;
   --floating-banner-gap: 14px;
@@ -175,24 +175,35 @@ a { text-decoration: none; color: inherit; }
 
 .news-banner-anchor {
   position: fixed;
-  right: calc(20px + var(--incident-floating-width) + var(--floating-banner-gap));
   bottom: var(--incident-floating-bottom);
   z-index: 510;
   width: min(var(--news-floating-width), calc(100vw - 40px));
 }
 
+.news-banner-anchor.with-incidents {
+  right: calc(20px + var(--incident-floating-width) + var(--floating-banner-gap));
+}
+
+.news-banner-anchor.no-incidents {
+  right: 20px;
+}
+
 @media (max-width: 1760px) {
-  .news-banner-anchor {
+  .news-banner-anchor.with-incidents {
     right: 20px;
     bottom: calc(var(--incident-floating-bottom) + var(--incident-floating-height) + var(--news-floating-gap));
     width: min(var(--news-floating-width), calc(100vw - 40px));
+  }
+  .news-banner-anchor.no-incidents {
+    right: 20px;
+    bottom: var(--incident-floating-bottom);
   }
 }
 
 @media (max-width: 768px) {
   :root {
     --incident-floating-bottom: 10px;
-    --incident-floating-height: 116px;
+    --incident-floating-height: 78px;
   }
   .floating-inventory-save {
     right: 12px;
@@ -206,6 +217,12 @@ a { text-decoration: none; color: inherit; }
   .news-banner-anchor {
     right: 12px;
     width: min(var(--news-floating-width), calc(100vw - 24px));
+  }
+  .news-banner-anchor.with-incidents {
+    bottom: calc(var(--incident-floating-bottom) + var(--incident-floating-height) + var(--news-floating-gap));
+  }
+  .news-banner-anchor.no-incidents {
+    bottom: var(--incident-floating-bottom);
   }
 }
 

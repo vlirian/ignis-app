@@ -9,7 +9,8 @@ export default function IncidentBanner() {
   const location = useLocation()
   const [expanded, setExpanded] = useState(false)
   const [dismissed, setDismissed] = useState(false)
-  const dismissKey = `ignis:incidents:dismissed:${session?.access_token || 'anon'}`
+  const identity = session?.user?.id || session?.user?.email || 'anon'
+  const dismissKey = `ignis:incidents:dismissed:${identity}`
 
   useEffect(() => {
     try {

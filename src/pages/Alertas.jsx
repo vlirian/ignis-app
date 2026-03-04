@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 export default function Alertas() {
-  const { configs, items, revisionIncidents, hasPermission, showToast, session, setUnitItemState } = useApp()
+  const { configs, items, revisionIncidents, hasPermission, showToast, session, setUnitItemState, updateQty } = useApp()
   const canEdit = hasPermission('edit')
   const activeUnitIds = Object.keys(configs || {})
     .map(Number)
@@ -20,7 +20,8 @@ export default function Alertas() {
   const [vehicleIncidents, setVehicleIncidents] = useState([])
   const [createType, setCreateType] = useState('material')
   const [creating, setCreating] = useState(false)
-  const [materialForm, setMaterialForm] = useState({ unitId: '', zoneId: '', itemId: '', note: '' })
+  const [materialForm, setMaterialForm] = useState({ unitId: '', zoneId: '', itemId: '', note: '', mode: 'missing' })
+  const [materialFiles, setMaterialFiles] = useState([])
   const [vehicleForm, setVehicleForm] = useState({ unitId: '', title: '', description: '', severity: 'media' })
   const [installationForm, setInstallationForm] = useState({ title: '', location: '', description: '', severity: 'media' })
 
@@ -96,14 +97,50 @@ export default function Alertas() {
       return
     }
 
+    if (materialForm.mode === 'incident' && !materialForm.note.trim()) {
+      showToast('Describe la incidencia del material', 'warn')
+      return
+    }
+
+    const uploadedUrls = []
+    if (materialForm.mode === 'incident' && materialFiles.length > 0) {
+      for (const file of materialFiles) {
+        const ext = String(file.name || '').includes('.') ? String(file.name).split('.').pop() : 'jpg'
+        const path = `incidencias/material/${unitId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+        const { error: uploadErr } = await supabase.storage.from('revision-observaciones').upload(path, file, { upsert: false })
+        if (uploadErr) {
+          showToast(`No se pudo subir foto: ${uploadErr.message || 'error'}`, 'error')
+          return
+        }
+        const { data: pub } = supabase.storage.from('revision-observaciones').getPublicUrl(path)
+        if (pub?.publicUrl) uploadedUrls.push(pub.publicUrl)
+      }
+    }
+
+    const note = materialForm.mode === 'missing'
+      ? 'Marcado por bombero: NO está'
+      : (materialForm.note.trim() || 'Marcado por bombero: PRESENTA incidencia')
+
     setCreating(true)
-    const res = await setUnitItemState(unitId, item.id, { status: 'issue', note: materialForm.note.trim() || 'Marcado desde Incidencias' })
+    if (materialForm.mode === 'missing') {
+      const currentQty = Number(item.qty) || 0
+      if (currentQty > 0) {
+        const qtyRes = await updateQty(unitId, zoneId, item.id, -currentQty)
+        if (!qtyRes?.ok) {
+          setCreating(false)
+          showToast(`No se pudo poner el contador a 0: ${qtyRes?.error || 'error'}`, 'error')
+          return
+        }
+      }
+    }
+    const res = await setUnitItemState(unitId, item.id, { status: 'issue', note }, { photoUrls: uploadedUrls })
     setCreating(false)
     if (!res?.ok) {
       showToast(`No se pudo crear incidencia: ${res?.error || 'error'}`, 'error')
       return
     }
-    setMaterialForm({ unitId: '', zoneId: '', itemId: '', note: '' })
+    setMaterialForm({ unitId: '', zoneId: '', itemId: '', note: '', mode: 'missing' })
+    setMaterialFiles([])
     showToast('Incidencia de material creada', 'ok')
   }
 
@@ -496,9 +533,80 @@ export default function Alertas() {
               </div>
             </div>
             <div className="form-group" style={{ marginBottom: 0, marginTop: 10 }}>
-              <label className="form-label">Detalle</label>
-              <input className="form-input" value={materialForm.note} onChange={e => setMaterialForm(p => ({ ...p, note: e.target.value }))} placeholder='Ej: No está / Presenta incidencia en carcasa' />
+              <label className="form-label">Estado del material</label>
+              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--light)' }}>
+                  <input
+                    type="radio"
+                    name="material-mode"
+                    checked={materialForm.mode === 'missing'}
+                    onChange={() => setMaterialForm(p => ({ ...p, mode: 'missing', note: '' }))}
+                  />
+                  No está (contador a 0)
+                </label>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--light)' }}>
+                  <input
+                    type="radio"
+                    name="material-mode"
+                    checked={materialForm.mode === 'incident'}
+                    onChange={() => setMaterialForm(p => ({ ...p, mode: 'incident' }))}
+                  />
+                  Presenta incidencia
+                </label>
+              </div>
             </div>
+            <div className="form-group" style={{ marginBottom: 0, marginTop: 10 }}>
+              <label className="form-label">Detalle</label>
+              <input
+                className="form-input"
+                value={materialForm.note}
+                onChange={e => setMaterialForm(p => ({ ...p, note: e.target.value }))}
+                placeholder={materialForm.mode === 'missing' ? 'Se guardará como: NO está' : 'Describe la incidencia'}
+                disabled={materialForm.mode === 'missing'}
+              />
+            </div>
+            {materialForm.mode === 'incident' && (
+              <div className="form-group" style={{ marginBottom: 0, marginTop: 10 }}>
+                <label className="form-label">Fotos (cámara o dispositivo)</label>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
+                    📷 Cámara
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files || []).filter(f => f?.type?.startsWith('image/'))
+                        if (!files.length) return
+                        setMaterialFiles(prev => [...prev, ...files])
+                        e.target.value = ''
+                      }}
+                      style={{ display: 'none' }}
+                    />
+                  </label>
+                  <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
+                    🖼 Adjuntar
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files || []).filter(f => f?.type?.startsWith('image/'))
+                        if (!files.length) return
+                        setMaterialFiles(prev => [...prev, ...files])
+                        e.target.value = ''
+                      }}
+                      style={{ display: 'none' }}
+                    />
+                  </label>
+                  {materialFiles.length > 0 && (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setMaterialFiles([])}>
+                      Limpiar fotos ({materialFiles.length})
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </>
         )}
 

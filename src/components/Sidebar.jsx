@@ -26,8 +26,10 @@ const NAV = [
   { to: '/unidades',     icon: '🚒', label: 'Material Unidades' },
   { to: '/vehiculos',    icon: '🚚', label: 'Vehículos' },
   { to: '/instalaciones', icon: '🏢', label: 'Instalaciones' },
+  { to: '/repostaje',    icon: '⛽', label: 'Repostaje' },
+  { to: '/cambios-turno', icon: '🔄', label: 'Cambios de turno' },
   { to: '/epi',          icon: '🦺', label: 'Cuarto NBQ' },
-  { to: '/sanitario',    icon: '🩺', label: 'Material de Rescate' },
+  { to: '/sanitario',    icon: '🪝', label: 'Material de Rescate' },
   { to: '/herramientas', icon: '⚙️',  label: 'Herramientas' },
   { to: '/mantenimiento',icon: '🔧', label: 'Mantenimiento' },
   { to: '/turnos',       icon: '📋', label: 'Turnos' },
@@ -148,11 +150,24 @@ export default function Sidebar({ open, onClose }) {
 
     async function refreshNewsCount() {
       try {
-        const { count, error } = await supabase
+        let count = 0
+        let error = null
+        const withArchive = await supabase
           .from('news_messages')
           .select('*', { count: 'exact', head: true })
+          .or('is_archived.is.false,is_archived.is.null')
+        if (withArchive.error) {
+          const legacy = await supabase
+            .from('news_messages')
+            .select('*', { count: 'exact', head: true })
+          count = Number(legacy.count || 0)
+          error = legacy.error
+        } else {
+          count = Number(withArchive.count || 0)
+          error = null
+        }
         if (error) return
-        if (mounted) setNewsCount(Number(count || 0))
+        if (mounted) setNewsCount(count)
       } catch {
         // ignore
       }
@@ -196,7 +211,7 @@ export default function Sidebar({ open, onClose }) {
           ))}
 
           <div className={styles.sectionLabel}>Operaciones</div>
-          {navItems.filter(i => ['/revision', '/unidades', '/vehiculos', '/instalaciones'].includes(i.to)).map(item => (
+          {navItems.filter(i => ['/revision', '/unidades', '/vehiculos', '/instalaciones', '/repostaje'].includes(i.to)).map(item => (
             <NavItem
               key={item.to}
               item={item}
@@ -213,6 +228,11 @@ export default function Sidebar({ open, onClose }) {
               ))}
             </>
           )}
+
+          <div className={styles.sectionLabel}>Administración</div>
+          {navItems.filter(i => ['/cambios-turno'].includes(i.to)).map(item => (
+            <NavItem key={item.to} item={item} onClose={onClose} />
+          ))}
 
           <div className={styles.sectionLabel}>Sistema</div>
           {navItems.filter(i => ['/mantenimiento', '/turnos', '/admin', '/informe-incidencias'].includes(i.to)).map(item => (

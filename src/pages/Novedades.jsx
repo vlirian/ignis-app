@@ -39,12 +39,28 @@ export default function Novedades() {
 
   async function loadNews() {
     setLoading(true)
-    const { data, error } = await supabase
+    let data = null
+    let error = null
+    const withArchive = await supabase
       .from('news_messages')
-      .select('id, created_at, title, message, priority, created_by')
+      .select('id, created_at, title, message, priority, created_by, is_archived, archived_at, archived_by')
+      .order('is_archived', { ascending: true })
       .order('priority', { ascending: false })
       .order('created_at', { ascending: false })
-      .limit(200)
+      .limit(300)
+    if (withArchive.error) {
+      const legacy = await supabase
+        .from('news_messages')
+        .select('id, created_at, title, message, priority, created_by')
+        .order('priority', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(300)
+      data = (legacy.data || []).map(r => ({ ...r, is_archived: false, archived_at: null, archived_by: null }))
+      error = legacy.error
+    } else {
+      data = withArchive.data || []
+      error = null
+    }
     setLoading(false)
     if (error) {
       showToast(`No se pudieron cargar novedades: ${error.message || 'error'}`, 'error')
@@ -71,6 +87,7 @@ export default function Novedades() {
         message: form.message.trim(),
         priority: Number(form.priority) || 2,
         created_by: session?.user?.email || null,
+        is_archived: false,
       })
     setSaving(false)
     if (error) {
@@ -79,6 +96,23 @@ export default function Novedades() {
     }
     setForm({ title: '', message: '', priority: 2 })
     showToast('Novedad añadida', 'ok')
+    await loadNews()
+  }
+
+  async function setArchived(id, archived) {
+    if (!canEdit) {
+      showToast('Solo lectura: no puedes archivar novedades', 'warn')
+      return
+    }
+    const payload = archived
+      ? { is_archived: true, archived_at: new Date().toISOString(), archived_by: session?.user?.email || null }
+      : { is_archived: false, archived_at: null, archived_by: null }
+    const { error } = await supabase.from('news_messages').update(payload).eq('id', id)
+    if (error) {
+      showToast(`No se pudo ${archived ? 'archivar' : 'restaurar'}: ${error.message || 'error'}`, 'error')
+      return
+    }
+    showToast(archived ? 'Novedad archivada' : 'Novedad restaurada', 'ok')
     await loadNews()
   }
 
@@ -98,14 +132,17 @@ export default function Novedades() {
     await loadNews()
   }
 
+  const activeRows = useMemo(() => rows.filter(r => !r.is_archived), [rows])
+  const archivedRows = useMemo(() => rows.filter(r => !!r.is_archived), [rows])
+
   const groupedCount = useMemo(() => {
     const byP = { 4: 0, 3: 0, 2: 0, 1: 0 }
-    rows.forEach(r => {
+    activeRows.forEach(r => {
       const p = Number(r.priority)
       byP[p] = (byP[p] || 0) + 1
     })
     return byP
-  }, [rows])
+  }, [activeRows])
 
   return (
     <div className="animate-in page-container">
@@ -174,11 +211,11 @@ export default function Novedades() {
 
       <div className="card" style={{ padding: 0 }}>
         <div className="card-header">
-          <div className="card-title">📢 Mensajes ({rows.length})</div>
+          <div className="card-title">📢 Novedades activas ({activeRows.length})</div>
         </div>
         {loading ? (
           <div style={{ padding: 14, color: 'var(--mid)' }}>Cargando novedades...</div>
-        ) : rows.length === 0 ? (
+        ) : activeRows.length === 0 ? (
           <div style={{ padding: 14, color: 'var(--mid)' }}>No hay novedades todavía.</div>
         ) : (
           <div className="table-wrap">
@@ -194,7 +231,7 @@ export default function Novedades() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map(r => (
+                {activeRows.map(r => (
                   <tr key={r.id}>
                     <td style={{ fontSize: 12, color: 'var(--mid)' }}>
                       {r.created_at ? new Date(r.created_at).toLocaleString('es-ES') : '—'}
@@ -204,9 +241,53 @@ export default function Novedades() {
                     <td style={{ fontSize: 12, color: 'var(--light)', maxWidth: 640 }}>{r.message}</td>
                     <td style={{ fontSize: 12, color: 'var(--mid)' }}>{r.created_by || '—'}</td>
                     <td style={{ textAlign: 'right' }}>
-                      {isAdmin && (
-                        <button className="btn btn-danger btn-sm" onClick={() => deleteNews(r.id)}>Borrar</button>
-                      )}
+                      <div style={{ display: 'inline-flex', gap: 6 }}>
+                        {canEdit && <button className="btn btn-ghost btn-sm" onClick={() => setArchived(r.id, true)}>Archivar</button>}
+                        {isAdmin && <button className="btn btn-danger btn-sm" onClick={() => deleteNews(r.id)}>Borrar</button>}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={{ padding: 0, marginTop: 16 }}>
+        <div className="card-header">
+          <div className="card-title">🗄 Archivo de novedades ({archivedRows.length})</div>
+        </div>
+        {archivedRows.length === 0 ? (
+          <div style={{ padding: 14, color: 'var(--mid)' }}>No hay novedades archivadas.</div>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Prioridad</th>
+                  <th>Título</th>
+                  <th>Mensaje</th>
+                  <th>Archivada por</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {archivedRows.map(r => (
+                  <tr key={r.id}>
+                    <td style={{ fontSize: 12, color: 'var(--mid)' }}>
+                      {r.created_at ? new Date(r.created_at).toLocaleString('es-ES') : '—'}
+                    </td>
+                    <td><span className={`chip ${priorityChipClass(r.priority)}`}>{priorityLabel(r.priority)}</span></td>
+                    <td style={{ fontWeight: 700 }}>{r.title}</td>
+                    <td style={{ fontSize: 12, color: 'var(--light)', maxWidth: 640 }}>{r.message}</td>
+                    <td style={{ fontSize: 12, color: 'var(--mid)' }}>{r.archived_by || '—'}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'inline-flex', gap: 6 }}>
+                        {canEdit && <button className="btn btn-ghost btn-sm" onClick={() => setArchived(r.id, false)}>Restaurar</button>}
+                        {isAdmin && <button className="btn btn-danger btn-sm" onClick={() => deleteNews(r.id)}>Borrar</button>}
+                      </div>
                     </td>
                   </tr>
                 ))}

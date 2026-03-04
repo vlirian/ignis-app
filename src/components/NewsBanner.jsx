@@ -12,13 +12,16 @@ function priorityLabel(priority) {
 }
 
 export default function NewsBanner() {
-  const { session } = useApp()
+  const { session, revisionIncidents } = useApp()
   const navigate = useNavigate()
   const location = useLocation()
   const [expanded, setExpanded] = useState(false)
   const [dismissed, setDismissed] = useState(false)
+  const [incidentDismissed, setIncidentDismissed] = useState(false)
   const [rows, setRows] = useState([])
-  const dismissKey = `ignis:news:dismissed:${session?.access_token || 'anon'}`
+  const identity = session?.user?.id || session?.user?.email || 'anon'
+  const dismissKey = `ignis:news:dismissed:${identity}`
+  const incidentDismissKey = `ignis:incidents:dismissed:${identity}`
 
   useEffect(() => {
     try {
@@ -27,6 +30,14 @@ export default function NewsBanner() {
       setDismissed(false)
     }
   }, [dismissKey])
+
+  useEffect(() => {
+    try {
+      setIncidentDismissed(window.sessionStorage.getItem(incidentDismissKey) === '1')
+    } catch {
+      setIncidentDismissed(false)
+    }
+  }, [incidentDismissKey])
 
   function dismissForSession() {
     setDismissed(true)
@@ -39,12 +50,28 @@ export default function NewsBanner() {
     let mounted = true
 
     async function loadNews() {
-      const { data, error } = await supabase
+      let data = null
+      let error = null
+      const withArchive = await supabase
         .from('news_messages')
-        .select('id, created_at, title, message, priority, created_by')
+        .select('id, created_at, title, message, priority, created_by, is_archived')
+        .or('is_archived.is.false,is_archived.is.null')
         .order('priority', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(30)
+      if (withArchive.error) {
+        const legacy = await supabase
+          .from('news_messages')
+          .select('id, created_at, title, message, priority, created_by')
+          .order('priority', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(30)
+        data = legacy.data || []
+        error = legacy.error
+      } else {
+        data = withArchive.data || []
+        error = null
+      }
 
       if (error || !mounted) return
       setRows(data || [])
@@ -70,11 +97,22 @@ export default function NewsBanner() {
   const total = rows.length
   const top = useMemo(() => rows.slice(0, 6), [rows])
   const isInNovedades = location.pathname === '/novedades'
+  const isInIncidencias = location.pathname === '/incidencias' || location.pathname === '/alertas'
+  const activeIncidents = useMemo(() => {
+    const all = [...(revisionIncidents || [])]
+    const map = new Map()
+    all.forEach(inc => {
+      const key = `${inc.unitId}|${String(inc.zone).trim().toLowerCase()}|${String(inc.item).trim().toLowerCase()}`
+      if (!map.has(key)) map.set(key, inc)
+    })
+    return Array.from(map.values())
+  }, [revisionIncidents])
+  const hasIncidentAnchor = activeIncidents.length > 0 && !isInIncidencias && !incidentDismissed
   if (total === 0 || dismissed || isInNovedades) return null
 
   return (
     <div
-      className="news-banner-anchor"
+      className={`news-banner-anchor ${hasIncidentAnchor ? 'with-incidents' : 'no-incidents'}`}
       style={{
         maxWidth: expanded ? 420 : 'none',
         filter: 'drop-shadow(0 8px 26px rgba(37,99,235,0.35))',
@@ -155,7 +193,14 @@ export default function NewsBanner() {
       )}
 
       <button
-        onClick={() => setExpanded((o) => !o)}
+        onClick={() => {
+          if (expanded) {
+            dismissForSession()
+            setExpanded(false)
+            return
+          }
+          setExpanded(true)
+        }}
         style={{
           display: 'flex',
           alignItems: 'center',
