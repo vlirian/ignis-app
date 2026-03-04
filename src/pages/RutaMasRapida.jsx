@@ -108,11 +108,11 @@ async function resolveStreetPdfSource(fileName) {
       }
     }
   } catch (_) {
-    // fallback local
+    // ignore: if storage object does not exist we do not show PDF block
   }
   return {
     existsInStorage: false,
-    resolvedUrl: urls.localUrl,
+    resolvedUrl: null,
     storageUrl: urls.publicUrl,
     localUrl: urls.localUrl,
   }
@@ -472,7 +472,7 @@ export default function RutaMasRapida() {
             </div>
           </div>
 
-          {result.streetPdfFile && (
+          {result.streetPdfFile && result.streetPdfUrls?.resolvedUrl && (
             <div className="card" style={{ padding: 12, background: 'var(--panel)', marginTop: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
                 <div style={{ fontSize: 11, color: 'var(--mid)', letterSpacing: 1.2, textTransform: 'uppercase' }}>
@@ -487,11 +487,6 @@ export default function RutaMasRapida() {
                   Abrir PDF
                 </a>
               </div>
-              {!result.streetPdfExistsInStorage && (
-                <div className="chip chip-warn" style={{ marginBottom: 8 }}>
-                  No existe en Storage. Archivo esperado: <code>{result.streetPdfFile}</code>
-                </div>
-              )}
               <div className="card" style={{ padding: 14, marginBottom: 10, background: 'rgba(20,27,40,0.75)', border: '1px solid var(--border2)' }}>
                 <div style={{ fontSize: 11, color: 'var(--mid)', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 }}>
                   Indicaciones extraídas del PDF
@@ -507,13 +502,6 @@ export default function RutaMasRapida() {
                   style={{ width: '100%', height: 680, border: 0, display: 'block' }}
                   loading="lazy"
                 />
-              </div>
-            </div>
-          )}
-          {!result.streetPdfFile && (
-            <div className="card" style={{ padding: 12, background: 'var(--panel)', marginTop: 12 }}>
-              <div style={{ fontSize: 12, color: 'var(--mid)' }}>
-                No hay PDF de itinerario local para esta calle en <code>pdfs_calles</code>.
               </div>
             </div>
           )}
