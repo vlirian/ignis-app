@@ -25,7 +25,8 @@ import Novedades from './pages/Novedades'
 import Repostaje from './pages/Repostaje'
 import CambiosTurno from './pages/CambiosTurno'
 import CallesCortadasHoy from './pages/CallesCortadasHoy'
-import { EPI, Herramientas, Sanitario, Mantenimiento, Turnos, RutaMasRapida } from './pages/Placeholders'
+import RutaMasRapida from './pages/RutaMasRapida'
+import { EPI, Herramientas, Sanitario, Mantenimiento, Turnos } from './pages/Placeholders'
 
 const PAGE_TITLES = {
   '/':              'Revisión Diaria',
