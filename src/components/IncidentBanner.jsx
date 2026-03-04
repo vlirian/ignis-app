@@ -11,6 +11,7 @@ export default function IncidentBanner() {
   const [dismissed, setDismissed] = useState(false)
   const identity = session?.user?.id || session?.user?.email || 'anon'
   const dismissKey = `ignis:incidents:dismissed:${identity}`
+  const dismissCountKey = `ignis:incidents:dismissed-count:${identity}`
 
   useEffect(() => {
     try {
@@ -24,6 +25,7 @@ export default function IncidentBanner() {
     setDismissed(true)
     try {
       window.sessionStorage.setItem(dismissKey, '1')
+      window.sessionStorage.setItem(dismissCountKey, String(uniqueIncidents.length))
     } catch {}
   }
 
@@ -36,6 +38,18 @@ export default function IncidentBanner() {
     if (!dedupMap.has(key)) dedupMap.set(key, inc)
   })
   const uniqueIncidents = Array.from(dedupMap.values())
+
+  useEffect(() => {
+    try {
+      const dismissedCount = Number(window.sessionStorage.getItem(dismissCountKey) || '0')
+      if (uniqueIncidents.length > dismissedCount) {
+        setDismissed(false)
+        window.sessionStorage.removeItem(dismissKey)
+      }
+    } catch {
+      // ignore
+    }
+  }, [uniqueIncidents.length, dismissCountKey, dismissKey])
 
   const isInIncidencias = location.pathname === '/incidencias' || location.pathname === '/alertas'
   useEffect(() => {

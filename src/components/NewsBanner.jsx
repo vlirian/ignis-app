@@ -21,6 +21,7 @@ export default function NewsBanner() {
   const [rows, setRows] = useState([])
   const identity = session?.user?.id || session?.user?.email || 'anon'
   const dismissKey = `ignis:news:dismissed:${identity}`
+  const dismissCountKey = `ignis:news:dismissed-count:${identity}`
   const incidentDismissKey = `ignis:incidents:dismissed:${identity}`
 
   useEffect(() => {
@@ -43,6 +44,7 @@ export default function NewsBanner() {
     setDismissed(true)
     try {
       window.sessionStorage.setItem(dismissKey, '1')
+      window.sessionStorage.setItem(dismissCountKey, String(rows.length))
     } catch {}
   }
 
@@ -108,6 +110,19 @@ export default function NewsBanner() {
     return Array.from(map.values())
   }, [revisionIncidents])
   const hasIncidentAnchor = activeIncidents.length > 0 && !isInIncidencias && !incidentDismissed
+
+  useEffect(() => {
+    try {
+      const dismissedCount = Number(window.sessionStorage.getItem(dismissCountKey) || '0')
+      if (total > dismissedCount) {
+        setDismissed(false)
+        window.sessionStorage.removeItem(dismissKey)
+      }
+    } catch {
+      // ignore
+    }
+  }, [total, dismissCountKey, dismissKey])
+
   if (total === 0 || dismissed || isInNovedades) return null
 
   return (

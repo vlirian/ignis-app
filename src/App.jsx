@@ -24,7 +24,7 @@ import Vehiculos from './pages/Vehiculos'
 import Novedades from './pages/Novedades'
 import Repostaje from './pages/Repostaje'
 import CambiosTurno from './pages/CambiosTurno'
-import { EPI, Herramientas, Sanitario, Mantenimiento, Turnos } from './pages/Placeholders'
+import { EPI, Herramientas, Sanitario, Mantenimiento, Turnos, CallesCortadasHoy, RutaMasRapida } from './pages/Placeholders'
 
 const PAGE_TITLES = {
   '/':              'Revisión Diaria',
@@ -40,6 +40,8 @@ const PAGE_TITLES = {
   '/instalaciones': 'Instalaciones',
   '/repostaje': 'Repostaje',
   '/cambios-turno': 'Cambios de turno',
+  '/calles-cortadas-hoy': 'Calles cortadas hoy',
+  '/ruta-mas-rapida': 'Ruta más rápida',
   '/admin':         'Administración',
   '/informe-incidencias': 'Informe diario de incidencias',
   '/resultado-busqueda': 'Resultado de búsqueda',
@@ -147,6 +149,8 @@ function AppInner() {
           <Route path="/instalaciones" element={<Instalaciones />} />
           <Route path="/repostaje" element={<Repostaje />} />
           <Route path="/cambios-turno" element={<CambiosTurno />} />
+          <Route path="/calles-cortadas-hoy" element={<CallesCortadasHoy />} />
+          <Route path="/ruta-mas-rapida" element={<RutaMasRapida />} />
           <Route path="/admin"         element={<Administracion />} />
           <Route path="/informe-incidencias" element={<InformeDiarioIncidencias />} />
           <Route path="/resultado-busqueda" element={<ResultadoBusqueda />} />

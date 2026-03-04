@@ -27,6 +27,8 @@ const NAV = [
   { to: '/vehiculos',    icon: '🚚', label: 'Vehículos' },
   { to: '/instalaciones', icon: '🏢', label: 'Instalaciones' },
   { to: '/repostaje',    icon: '⛽', label: 'Repostaje' },
+  { to: '/calles-cortadas-hoy', icon: '🚫', label: 'Calles cortadas hoy' },
+  { to: '/ruta-mas-rapida', icon: '⚡', label: 'Ruta más rápida' },
   { to: '/cambios-turno', icon: '🔄', label: 'Cambios de turno' },
   { to: '/epi',          icon: '🦺', label: 'Cuarto NBQ' },
   { to: '/sanitario',    icon: '🪝', label: 'Material de Rescate' },
@@ -218,6 +220,11 @@ export default function Sidebar({ open, onClose }) {
               onClose={onClose}
               reviewPending={item.to === '/revision' ? revisionPending : false}
             />
+          ))}
+
+          <div className={styles.sectionLabel}>Callejero</div>
+          {navItems.filter(i => ['/calles-cortadas-hoy', '/ruta-mas-rapida'].includes(i.to)).map(item => (
+            <NavItem key={item.to} item={item} onClose={onClose} />
           ))}
 
           {materialMenuEnabled && (

@@ -20,6 +20,14 @@ export function Turnos() {
   return <ComingSoon title="📋 Registro de Turnos" desc="Registro de uso de material por guardia e incidencia" />
 }
 
+export function CallesCortadasHoy() {
+  return <ComingSoon title="🚫 Calles cortadas hoy" desc="Listado diario de calles con cortes y restricciones de acceso" />
+}
+
+export function RutaMasRapida() {
+  return <ComingSoon title="⚡ Ruta más rápida" desc="Rutas optimizadas para llegada rápida a incidencias" />
+}
+
 export function Novedades() {
   return <ComingSoon title="🆕 Novedades" desc="Comunicados, avisos internos y actualizaciones del servicio" />
 }
