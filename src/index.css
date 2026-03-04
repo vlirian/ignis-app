@@ -25,6 +25,7 @@
   --news-floating-gap: 2px;
   --incident-floating-width: 420px;
   --news-floating-width: 360px;
+  --closures-floating-width: 420px;
   --floating-banner-gap: 14px;
 }
 
@@ -236,6 +237,14 @@ a { text-decoration: none; color: inherit; }
   width: min(var(--news-floating-width), calc(100vw - 40px));
 }
 
+.closures-banner-anchor {
+  position: fixed;
+  right: 20px;
+  bottom: calc(var(--incident-floating-bottom) + var(--incident-floating-height) + var(--news-floating-gap));
+  z-index: 505;
+  width: min(var(--closures-floating-width), calc(100vw - 40px));
+}
+
 .news-banner-anchor.with-incidents {
   right: calc(20px + var(--incident-floating-width) + var(--floating-banner-gap));
 }
@@ -273,6 +282,11 @@ a { text-decoration: none; color: inherit; }
   .news-banner-anchor {
     right: 12px;
     width: min(var(--news-floating-width), calc(100vw - 24px));
+  }
+  .closures-banner-anchor {
+    right: 12px;
+    width: min(var(--closures-floating-width), calc(100vw - 24px));
+    bottom: calc(var(--incident-floating-bottom) + var(--incident-floating-height) + var(--news-floating-gap));
   }
   .news-banner-anchor.with-incidents {
     bottom: calc(var(--incident-floating-bottom) + var(--incident-floating-height) + var(--news-floating-gap));

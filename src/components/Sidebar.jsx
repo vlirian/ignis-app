@@ -216,10 +216,21 @@ export default function Sidebar({ open, onClose }) {
     }
   }, [])
 
+  function handleSidebarContainerClick(event) {
+    if (!open) return
+    if (typeof window === 'undefined') return
+    if (window.innerWidth > 1024) return
+    if (event.target.closest('a[href]')) return
+    onClose?.()
+  }
+
   return (
     <>
       {open && <div className={styles.backdrop} onClick={onClose} />}
-      <aside className={`${styles.sidebar} ${open ? styles.open : ''}`}>
+      <aside
+        className={`${styles.sidebar} ${open ? styles.open : ''}`}
+        onClick={handleSidebarContainerClick}
+      >
         <div className={styles.logo}>
           <BrandLogo
             size="sm"

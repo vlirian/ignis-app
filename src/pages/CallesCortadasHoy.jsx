@@ -15,6 +15,27 @@ function streetLabel(street) {
   return formatStreetLabel(street)
 }
 
+function findMatchingStreets(streets, queryText) {
+  const q = normalizeSearchText(queryText)
+  if (!q) return []
+  return (streets || [])
+    .map((s) => {
+      const name = normalizeSearchText(s.name)
+      const label = normalizeSearchText(streetLabel(s))
+      const tokens = name.split(/\s+/).filter(Boolean)
+      let rank = 99
+      if (name.startsWith(q)) rank = 0
+      else if (label.startsWith(q)) rank = 1
+      else if (tokens.some((t) => t.startsWith(q))) rank = 2
+      else if (name.includes(q) || label.includes(q)) rank = 3
+      if (rank === 99) return null
+      return { s, rank }
+    })
+    .filter(Boolean)
+    .sort((a, b) => (a.rank - b.rank) || streetLabel(a.s).localeCompare(streetLabel(b.s)))
+    .map((x) => x.s)
+}
+
 export default function CallesCortadasHoy() {
   const { hasPermission, isAdmin, session, showToast } = useApp()
   const canEdit = hasPermission('edit')
@@ -22,6 +43,7 @@ export default function CallesCortadasHoy() {
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
   const [suggestions, setSuggestions] = useState([])
+  const [openSuggestions, setOpenSuggestions] = useState(false)
   const [selectedStreet, setSelectedStreet] = useState(null)
   const [allStreets, setAllStreets] = useState([])
 
@@ -63,15 +85,15 @@ export default function CallesCortadasHoy() {
     async function runSearch() {
       if (text.length < 2) {
         setSuggestions([])
+        setOpenSuggestions(false)
         return
       }
       setSearching(true)
+      const filtered = findMatchingStreets(allStreets, text).slice(0, 20)
       setSearching(false)
       if (canceled) return
-      const filtered = (allStreets || [])
-        .filter(s => normalizeSearchText(s.name).startsWith(text))
-        .slice(0, 20)
       setSuggestions(filtered)
+      setOpenSuggestions(filtered.length > 0)
     }
 
     const t = setTimeout(runSearch, 180)
@@ -203,7 +225,10 @@ export default function CallesCortadasHoy() {
               onChange={e => {
                 setQuery(e.target.value)
                 setSelectedStreet(null)
+                setOpenSuggestions(true)
               }}
+              onFocus={() => { if (suggestions.length > 0) setOpenSuggestions(true) }}
+              onBlur={() => setTimeout(() => setOpenSuggestions(false), 120)}
               placeholder="Escribe al menos 2 letras: ej. Bernabé Soriano"
             />
             {searching && (
@@ -211,7 +236,7 @@ export default function CallesCortadasHoy() {
                 buscando...
               </div>
             )}
-            {suggestions.length > 0 && !selectedStreet && (
+            {openSuggestions && suggestions.length > 0 && !selectedStreet && (
               <div className="card" style={{ position: 'absolute', left: 0, right: 0, top: 'calc(100% + 6px)', maxHeight: 260, overflowY: 'auto', zIndex: 12, padding: 6 }}>
                 {suggestions.map(s => (
                   <button
@@ -223,6 +248,7 @@ export default function CallesCortadasHoy() {
                       setSelectedStreet(s)
                       setQuery(streetLabel(s))
                       setSuggestions([])
+                      setOpenSuggestions(false)
                     }}
                   >
                     {streetLabel(s)}

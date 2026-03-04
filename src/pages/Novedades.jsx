@@ -174,7 +174,7 @@ export default function Novedades() {
           aria-expanded={createOpen}
         >
           <span style={{ fontFamily: 'Barlow Condensed', fontSize: 19, fontWeight: 800, letterSpacing: 0.6 }}>
-            ➕ Crear novedad
+            ➕ Añadir novedad
           </span>
           <span className={`fold-indicator ${createOpen ? 'is-open' : ''}`}>⌄</span>
         </button>

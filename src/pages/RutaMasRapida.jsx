@@ -184,6 +184,7 @@ export default function RutaMasRapida() {
   const [query, setQuery] = useState('')
   const [allStreets, setAllStreets] = useState([])
   const [suggestions, setSuggestions] = useState([])
+  const [openSuggestions, setOpenSuggestions] = useState(false)
   const [selectedStreet, setSelectedStreet] = useState(null)
   const [activeClosures, setActiveClosures] = useState([])
   const [streetWidthOverrides, setStreetWidthOverrides] = useState([])
@@ -202,10 +203,12 @@ export default function RutaMasRapida() {
     const text = normalizeSearchText(query)
     if (text.length < 2) {
       setSuggestions([])
+      setOpenSuggestions(false)
       return
     }
     const filtered = findMatchingStreets(allStreets, text).slice(0, 80)
     setSuggestions(filtered)
+    setOpenSuggestions(filtered.length > 0)
   }, [query, allStreets])
 
   useEffect(() => {
@@ -223,6 +226,7 @@ export default function RutaMasRapida() {
       setSelectedStreet(match)
       setQuery(streetLabel(match))
       setSuggestions([])
+      setOpenSuggestions(false)
       if (auto) {
         calculateRoute(match)
       }
@@ -407,7 +411,10 @@ export default function RutaMasRapida() {
                 setQuery(e.target.value)
                 setSelectedStreet(null)
                 setResult(null)
+                setOpenSuggestions(true)
               }}
+              onFocus={() => { if (suggestions.length > 0) setOpenSuggestions(true) }}
+              onBlur={() => setTimeout(() => setOpenSuggestions(false), 120)}
               onKeyDown={async (e) => {
                 if (e.key !== 'Enter') return
                 e.preventDefault()
@@ -417,13 +424,14 @@ export default function RutaMasRapida() {
                   setSelectedStreet(first)
                   setQuery(streetLabel(first))
                   setSuggestions([])
+                  setOpenSuggestions(false)
                 }
                 await calculateRoute(first)
               }}
               placeholder="Ej: Sierra Mágina"
             />
 
-            {suggestions.length > 0 && !selectedStreet && (
+            {openSuggestions && suggestions.length > 0 && !selectedStreet && (
               <div className="card" style={{ position: 'absolute', left: 0, right: 0, top: 'calc(100% + 6px)', maxHeight: 260, overflowY: 'auto', zIndex: 12, padding: 6 }}>
                 {suggestions.map((s) => (
                   <button
@@ -435,6 +443,7 @@ export default function RutaMasRapida() {
                       setSelectedStreet(s)
                       setQuery(streetLabel(s))
                       setSuggestions([])
+                      setOpenSuggestions(false)
                     }}
                   >
                     {streetLabel(s)}
