@@ -1,14 +1,30 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useLocation } from 'react-router-dom'
 import { useApp } from '../lib/AppContext'
 
 export default function IncidentBanner() {
-  const { revisionIncidents } = useApp()
+  const { revisionIncidents, session } = useApp()
   const navigate = useNavigate()
   const location = useLocation()
   const [expanded, setExpanded] = useState(false)
   const [dismissed, setDismissed] = useState(false)
+  const dismissKey = `ignis:incidents:dismissed:${session?.access_token || 'anon'}`
+
+  useEffect(() => {
+    try {
+      setDismissed(window.sessionStorage.getItem(dismissKey) === '1')
+    } catch {
+      setDismissed(false)
+    }
+  }, [dismissKey])
+
+  function dismissForSession() {
+    setDismissed(true)
+    try {
+      window.sessionStorage.setItem(dismissKey, '1')
+    } catch {}
+  }
 
   // ── Incidencias activas (fuente única: revisiones diarias) ──
   const allIncidents = [...(revisionIncidents || [])]
@@ -21,6 +37,10 @@ export default function IncidentBanner() {
   const uniqueIncidents = Array.from(dedupMap.values())
 
   const isInIncidencias = location.pathname === '/incidencias' || location.pathname === '/alertas'
+  useEffect(() => {
+    if (isInIncidencias) dismissForSession()
+  }, [isInIncidencias])
+
   if (uniqueIncidents.length === 0 || dismissed || isInIncidencias) return null
 
   const byUnit = uniqueIncidents.reduce((acc, inc) => {
@@ -56,7 +76,7 @@ export default function IncidentBanner() {
             <div style={{ fontFamily: 'Barlow Condensed', fontSize: 14, fontWeight: 800, color: 'var(--red-l)', letterSpacing: 0.5 }}>
               ⚠ {uniqueIncidents.length} INCIDENCIA{uniqueIncidents.length !== 1 ? 'S' : ''} ACTIVA{uniqueIncidents.length !== 1 ? 'S' : ''}
             </div>
-            <button onClick={() => setDismissed(true)} style={{ background: 'none', border: 'none', color: 'var(--mid)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }} title="Ocultar">✕</button>
+            <button onClick={() => dismissForSession()} style={{ background: 'none', border: 'none', color: 'var(--mid)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }} title="Ocultar">✕</button>
           </div>
 
           {/* Lista por unidad */}
@@ -107,7 +127,7 @@ export default function IncidentBanner() {
           {/* Ir a alertas */}
           <div style={{ padding: '8px 16px' }}>
             <button
-              onClick={() => { navigate('/incidencias'); setExpanded(false) }}
+              onClick={() => { dismissForSession(); navigate('/incidencias'); setExpanded(false) }}
               style={{
                 width: '100%', padding: '8px', background: 'rgba(192,57,43,0.12)',
                 border: '1px solid rgba(192,57,43,0.3)', borderRadius: 7,

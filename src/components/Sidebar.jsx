@@ -178,7 +178,7 @@ export default function Sidebar({ open, onClose }) {
             size="sm"
             title="IGNIS"
             subtitle="Gestión de Parques"
-            version="v1.0"
+            version="v2.3"
           />
         </div>
 

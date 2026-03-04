@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useApp } from '../lib/AppContext'
 
 function priorityLabel(priority) {
   const p = Number(priority || 2)
@@ -11,11 +12,28 @@ function priorityLabel(priority) {
 }
 
 export default function NewsBanner() {
+  const { session } = useApp()
   const navigate = useNavigate()
   const location = useLocation()
   const [expanded, setExpanded] = useState(false)
   const [dismissed, setDismissed] = useState(false)
   const [rows, setRows] = useState([])
+  const dismissKey = `ignis:news:dismissed:${session?.access_token || 'anon'}`
+
+  useEffect(() => {
+    try {
+      setDismissed(window.sessionStorage.getItem(dismissKey) === '1')
+    } catch {
+      setDismissed(false)
+    }
+  }, [dismissKey])
+
+  function dismissForSession() {
+    setDismissed(true)
+    try {
+      window.sessionStorage.setItem(dismissKey, '1')
+    } catch {}
+  }
 
   useEffect(() => {
     let mounted = true
@@ -44,8 +62,10 @@ export default function NewsBanner() {
   }, [])
 
   useEffect(() => {
-    if ((rows || []).length > 0) setDismissed(false)
-  }, [rows.length])
+    if (location.pathname === '/novedades') {
+      dismissForSession()
+    }
+  }, [location.pathname])
 
   const total = rows.length
   const top = useMemo(() => rows.slice(0, 6), [rows])
@@ -87,7 +107,7 @@ export default function NewsBanner() {
               📰 {total} NOVEDAD{total !== 1 ? 'ES' : ''} ACTIVA{total !== 1 ? 'S' : ''}
             </div>
             <button
-              onClick={() => setDismissed(true)}
+              onClick={() => dismissForSession()}
               style={{ background: 'none', border: 'none', color: 'var(--mid)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
               title="Ocultar"
             >
@@ -113,7 +133,7 @@ export default function NewsBanner() {
 
           <div style={{ padding: '8px 16px' }}>
             <button
-              onClick={() => { navigate('/novedades'); setExpanded(false) }}
+              onClick={() => { dismissForSession(); navigate('/novedades'); setExpanded(false) }}
               style={{
                 width: '100%',
                 padding: '8px',

@@ -568,9 +568,18 @@ export default function UnidadDetail() {
         ))}
       </div>
 
-      <div className="card" style={{ padding: '12px 14px', marginBottom: 16 }}>
+      <div
+        className="card"
+        style={{
+          padding: '12px 14px',
+          marginBottom: 16,
+          border: '1px solid rgba(52,152,219,0.55)',
+          background: 'linear-gradient(135deg, rgba(17,40,68,0.82), rgba(20,28,40,0.96))',
+          boxShadow: '0 0 0 1px rgba(52,152,219,0.18) inset, 0 10px 24px rgba(8,18,35,0.35)',
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, color: 'var(--mid)', letterSpacing: 1.2, textTransform: 'uppercase', fontWeight: 700 }}>
+          <span style={{ fontSize: 11, color: 'var(--blue-l)', letterSpacing: 1.2, textTransform: 'uppercase', fontWeight: 800 }}>
             Buscar en esta unidad
           </span>
           <input
@@ -578,10 +587,19 @@ export default function UnidadDetail() {
             value={unitSearch}
             onChange={e => setUnitSearch(e.target.value)}
             placeholder={`Ej: manguera, extintor, ${selectedZone ? 'solo zona seleccionada' : 'cualquier zona'}...`}
-            style={{ maxWidth: 460 }}
+            style={{
+              maxWidth: 460,
+              background: 'rgba(255,163,82,0.16)',
+              border: '1px solid rgba(255,173,96,0.55)',
+              color: 'var(--white)',
+            }}
           />
           {unitSearch && (
-            <button className="btn btn-ghost btn-sm" onClick={() => setUnitSearch('')}>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setUnitSearch('')}
+              style={{ borderColor: 'rgba(124,197,255,0.45)', color: 'var(--blue-l)' }}
+            >
               Limpiar
             </button>
           )}

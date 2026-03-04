@@ -22,7 +22,7 @@
   --sidebar-width: 220px;
   --incident-floating-bottom: 20px;
   --incident-floating-height: 112px;
-  --news-floating-gap: 10px;
+  --news-floating-gap: 8px;
   --incident-floating-width: 420px;
   --news-floating-width: 360px;
   --floating-banner-gap: 14px;
@@ -181,7 +181,7 @@ a { text-decoration: none; color: inherit; }
   width: min(var(--news-floating-width), calc(100vw - 40px));
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 1760px) {
   .news-banner-anchor {
     right: 20px;
     bottom: calc(var(--incident-floating-bottom) + var(--incident-floating-height) + var(--news-floating-gap));

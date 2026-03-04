@@ -132,8 +132,15 @@ export default function GlobalSearch() {
                 onChange={e => setQuery(e.target.value)}
                 placeholder="Buscar material en todas las unidades..."
                 style={{
-                  flex: 1, background: 'transparent', border: 'none', outline: 'none',
-                  color: 'var(--white)', fontSize: 16, fontFamily: 'Barlow',
+                  flex: 1,
+                  background: 'rgba(255,163,82,0.18)',
+                  border: '1px solid rgba(255,173,96,0.55)',
+                  borderRadius: 8,
+                  outline: 'none',
+                  color: 'var(--white)',
+                  fontSize: 16,
+                  fontFamily: 'Barlow',
+                  padding: '8px 12px',
                 }}
               />
               {query && (
