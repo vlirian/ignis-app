@@ -67,8 +67,8 @@ export default function LoginPage() {
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
           <BrandLogo
             size="lg"
-            title="IGNIS"
-            subtitle="Gestión de Material — Bomberos Jaén"
+            title="L.E.O."
+            subtitle="Gestión de Parques — Bomberos Jaén"
             center
           />
         </div>

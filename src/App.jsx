@@ -8,6 +8,7 @@ import Toast from './components/Toast'
 import GlobalSearch from './components/GlobalSearch'
 import IncidentBanner from './components/IncidentBanner'
 import NewsBanner from './components/NewsBanner'
+import StreetClosuresBanner from './components/StreetClosuresBanner'
 import BrandLogo from './components/BrandLogo'
 import LoginPage from './pages/LoginPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
@@ -65,7 +66,7 @@ function LoadingScreen() {
     }}>
       <BrandLogo
         size="md"
-        title="IGNIS"
+        title="L.E.O."
         subtitle=""
       />
       <div style={{ fontSize: 13, color: 'var(--mid)', letterSpacing: 2 }}>CARGANDO DATOS...</div>
@@ -104,7 +105,7 @@ function AppInner() {
   if (loading) return <LoadingScreen />
 
   const base  = '/' + location.pathname.split('/')[1]
-  const title = PAGE_TITLES[base] || 'IGNIS'
+  const title = PAGE_TITLES[base] || 'L.E.O.'
   const userEmail = session?.user?.email || ''
 
   return (
@@ -170,6 +171,7 @@ function AppInner() {
       </div>
 
       <NewsBanner />
+      <StreetClosuresBanner />
       <IncidentBanner />
       <Toast />
       <MobileQuickNav />

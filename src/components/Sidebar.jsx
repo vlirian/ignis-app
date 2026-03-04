@@ -223,7 +223,7 @@ export default function Sidebar({ open, onClose }) {
         <div className={styles.logo}>
           <BrandLogo
             size="sm"
-            title="IGNIS"
+            title="L.E.O."
             subtitle="Gestión de Parques"
             version="v2.3"
           />
