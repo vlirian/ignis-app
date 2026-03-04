@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../lib/AppContext'
+import { PDF_CALLES_FILES } from '../data/pdfsCallesManifest'
 
-const ORIGIN = 'Avenida de Andalucía, Jaén'
+const ORIGIN = 'Bomberos de Jaén, Avenida de Andalucía s/N, Jaén'
+const ORIGIN_COORDS = '37.77860,-3.81144'
 
 function normalizeSearchText(value) {
   return String(value || '')
@@ -15,6 +17,37 @@ function normalizeSearchText(value) {
 function streetLabel(street) {
   if (!street) return ''
   return `${street.via_type || ''} ${street.name || ''}`.trim()
+}
+
+function normalizeFileStem(name) {
+  let s = String(name || '')
+    .replace(/\.pdf$/i, '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+  s = s
+    .replace(/[,._()[\]{}]/g, ' ')
+    .replace(/\s+\d+(?:[-\s(].*)?$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return s
+}
+
+function matchStreetPdf(streetName) {
+  const target = normalizeFileStem(streetName)
+  if (!target) return null
+  const candidates = (PDF_CALLES_FILES || [])
+    .map((file) => {
+      const stem = normalizeFileStem(file)
+      const starts = stem.startsWith(target) || target.startsWith(stem)
+      const includes = stem.includes(target) || target.includes(stem)
+      if (!starts && !includes) return null
+      const score = starts ? 0 : 1
+      return { file, stem, score, delta: Math.abs(stem.length - target.length) }
+    })
+    .filter(Boolean)
+    .sort((a, b) => (a.score - b.score) || (a.delta - b.delta) || a.file.localeCompare(b.file))
+  return candidates[0]?.file || null
 }
 
 function estimateStreetWidth(street) {
@@ -146,6 +179,7 @@ export default function RutaMasRapida() {
 
     const width = resolveStreetWidth(selectedStreet, streetWidthOverrides)
     const destination = streetLabel(selectedStreet)
+    const streetPdfFile = matchStreetPdf(selectedStreet?.name || destination)
 
     const steps = [
       `Salida desde parque: ${ORIGIN}.`,
@@ -162,7 +196,8 @@ export default function RutaMasRapida() {
       steps.push('ATENCIÓN: la calle destino aparece actualmente cortada en el registro diario.')
     }
 
-    const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(ORIGIN)}&destination=${encodeURIComponent(destination + ', Jaén')}`
+    const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(ORIGIN_COORDS)}&destination=${encodeURIComponent(destination + ', Jaén')}`
+    const mapsEmbedUrl = `https://www.google.com/maps?output=embed&saddr=${encodeURIComponent(ORIGIN_COORDS)}&daddr=${encodeURIComponent(destination + ', Jaén')}`
 
     setResult({
       origin: ORIGIN,
@@ -172,6 +207,8 @@ export default function RutaMasRapida() {
       closureReason: selectedClosure?.reason || null,
       steps,
       mapsUrl,
+      mapsEmbedUrl,
+      streetPdfFile,
     })
 
     setCalculating(false)
@@ -292,6 +329,55 @@ export default function RutaMasRapida() {
                 <li key={`step-${idx}`} style={{ fontSize: 13, color: 'var(--light)' }}>{step}</li>
               ))}
             </ol>
+          </div>
+
+          {result.streetPdfFile && (
+            <div className="card" style={{ padding: 12, background: 'var(--panel)', marginTop: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+                <div style={{ fontSize: 11, color: 'var(--mid)', letterSpacing: 1.2, textTransform: 'uppercase' }}>
+                  Itinerario PDF local
+                </div>
+                <a
+                  className="btn btn-ghost btn-sm"
+                  target="_blank"
+                  rel="noreferrer"
+                  href={`/pdfs_calles/${encodeURIComponent(result.streetPdfFile)}`}
+                >
+                  Abrir PDF
+                </a>
+              </div>
+              <div style={{ width: '100%', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border2)' }}>
+                <iframe
+                  title="Itinerario PDF"
+                  src={`/pdfs_calles/${encodeURIComponent(result.streetPdfFile)}`}
+                  style={{ width: '100%', height: 440, border: 0, display: 'block' }}
+                  loading="lazy"
+                />
+              </div>
+            </div>
+          )}
+          {!result.streetPdfFile && (
+            <div className="card" style={{ padding: 12, background: 'var(--panel)', marginTop: 12 }}>
+              <div style={{ fontSize: 12, color: 'var(--mid)' }}>
+                No hay PDF de itinerario local para esta calle en <code>pdfs_calles</code>.
+              </div>
+            </div>
+          )}
+
+          <div className="card" style={{ padding: 12, background: 'var(--panel)', marginTop: 12 }}>
+            <div style={{ fontSize: 11, color: 'var(--mid)', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 }}>
+              Mapa (Google Maps)
+            </div>
+            <div style={{ width: '100%', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border2)' }}>
+              <iframe
+                title="Ruta Google Maps"
+                src={result.mapsEmbedUrl}
+                style={{ width: '100%', height: 360, border: 0, display: 'block' }}
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+                allowFullScreen
+              />
+            </div>
           </div>
         </div>
       )}
