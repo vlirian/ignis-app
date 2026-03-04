@@ -1,6 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../lib/AppContext'
+
+function dataUrlToBlob(dataUrl) {
+  const [meta, content] = String(dataUrl || '').split(',')
+  const mime = (meta.match(/data:(.*?);base64/) || [])[1] || 'image/png'
+  const binary = atob(content || '')
+  const len = binary.length
+  const bytes = new Uint8Array(len)
+  for (let i = 0; i < len; i += 1) bytes[i] = binary.charCodeAt(i)
+  return new Blob([bytes], { type: mime })
+}
 
 function statusChip(status) {
   const s = String(status || 'pendiente').toLowerCase()
@@ -8,6 +18,100 @@ function statusChip(status) {
   if (s === 'rechazado') return <span className="chip chip-red">RECHAZADO</span>
   if (s === 'cancelado') return <span className="chip chip-gray">CANCELADO</span>
   return <span className="chip chip-yellow">PENDIENTE</span>
+}
+
+function SignaturePad({ value, onChange, hint }) {
+  const canvasRef = useRef(null)
+  const drawingRef = useRef(false)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const dpr = window.devicePixelRatio || 1
+    const width = canvas.clientWidth
+    const height = canvas.clientHeight
+    canvas.width = Math.floor(width * dpr)
+    canvas.height = Math.floor(height * dpr)
+    const ctx = canvas.getContext('2d')
+    ctx.scale(dpr, dpr)
+    ctx.fillStyle = 'rgba(0,0,0,0.14)'
+    ctx.fillRect(0, 0, width, height)
+    ctx.strokeStyle = '#f8fafc'
+    ctx.lineWidth = 2
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    if (value) {
+      const img = new Image()
+      img.onload = () => ctx.drawImage(img, 0, 0, width, height)
+      img.src = value
+    }
+  }, [])
+
+  const pointerPos = (e) => {
+    const canvas = canvasRef.current
+    const rect = canvas.getBoundingClientRect()
+    const point = e.touches?.[0] || e
+    return { x: point.clientX - rect.left, y: point.clientY - rect.top }
+  }
+
+  const begin = (e) => {
+    e.preventDefault()
+    const ctx = canvasRef.current?.getContext('2d')
+    if (!ctx) return
+    drawingRef.current = true
+    const p = pointerPos(e)
+    ctx.beginPath()
+    ctx.moveTo(p.x, p.y)
+  }
+
+  const move = (e) => {
+    if (!drawingRef.current) return
+    e.preventDefault()
+    const ctx = canvasRef.current?.getContext('2d')
+    if (!ctx) return
+    const p = pointerPos(e)
+    ctx.lineTo(p.x, p.y)
+    ctx.stroke()
+  }
+
+  const end = () => {
+    if (!drawingRef.current) return
+    drawingRef.current = false
+    const canvas = canvasRef.current
+    if (!canvas) return
+    onChange(canvas.toDataURL('image/png'))
+  }
+
+  const clear = () => {
+    const canvas = canvasRef.current
+    const ctx = canvas?.getContext('2d')
+    if (!ctx || !canvas) return
+    ctx.fillStyle = 'rgba(0,0,0,0.14)'
+    ctx.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight)
+    onChange('')
+  }
+
+  return (
+    <div>
+      <div style={{ border: '1px solid var(--border2)', borderRadius: 10, overflow: 'hidden', background: 'rgba(0,0,0,0.2)' }}>
+        <canvas
+          ref={canvasRef}
+          style={{ display: 'block', width: '100%', height: 120, touchAction: 'none', cursor: 'crosshair' }}
+          onMouseDown={begin}
+          onMouseMove={move}
+          onMouseUp={end}
+          onMouseLeave={end}
+          onTouchStart={begin}
+          onTouchMove={move}
+          onTouchEnd={end}
+        />
+      </div>
+      <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ fontSize: 12, color: 'var(--mid)' }}>{hint || 'Firma aquí'}</div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={clear}>Limpiar</button>
+      </div>
+    </div>
+  )
 }
 
 export default function CambiosTurno() {
@@ -18,9 +122,13 @@ export default function CambiosTurno() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [rows, setRows] = useState([])
+  const [requesterSignature, setRequesterSignature] = useState('')
+  const [partnerSignature, setPartnerSignature] = useState('')
   const [form, setForm] = useState({
-    partner_email: '',
+    requester_name: '',
+    requester_shift: 'A',
     current_shift_date: '',
+    partner_name: '',
     requested_shift_date: '',
     notes: '',
   })
@@ -35,21 +143,29 @@ export default function CambiosTurno() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [email, isAdmin])
 
+  async function uploadSignature(dataUrl, path) {
+    const blob = dataUrlToBlob(dataUrl)
+    const { error: uploadErr } = await supabase.storage
+      .from('revision-observaciones')
+      .upload(path, blob, { upsert: false, contentType: 'image/png' })
+    if (uploadErr) return { ok: false, error: uploadErr.message || 'upload_error' }
+    const { data } = supabase.storage.from('revision-observaciones').getPublicUrl(path)
+    return { ok: true, url: data?.publicUrl || '' }
+  }
+
   async function loadRows() {
     if (!email && !isAdmin) return
     setLoading(true)
     let query = supabase
       .from('shift_change_requests')
-      .select('id, created_at, requester_email, partner_email, current_shift_date, requested_shift_date, notes, status, resolved_at, resolved_by')
+      .select('*')
       .order('created_at', { ascending: false })
       .limit(300)
-    if (!isAdmin) {
-      query = query.or(`requester_email.eq.${email},partner_email.eq.${email}`)
-    }
+    if (!isAdmin) query = query.eq('requester_email', email)
     const { data, error } = await query
     setLoading(false)
     if (error) {
-      showToast(`No se pudieron cargar cambios de turno: ${error.message || 'error'} (ejecuta cambios-turno.sql)`, 'error')
+      showToast(`No se pudieron cargar cambios de turno: ${error.message || 'error'} (ejecuta cambios-turno.sql + cambios-turno-v2.sql)`, 'error')
       return
     }
     setRows(data || [])
@@ -61,58 +177,65 @@ export default function CambiosTurno() {
       showToast('Solo lectura: no puedes solicitar cambios de turno', 'warn')
       return
     }
-    const partner = String(form.partner_email || '').trim().toLowerCase()
-    if (!partner || !partner.includes('@')) {
-      showToast('Introduce un email válido del compañero', 'warn')
-      return
-    }
-    if (partner === email) {
-      showToast('No puedes solicitar cambio contigo mismo', 'warn')
-      return
-    }
-    if (!form.current_shift_date || !form.requested_shift_date) {
-      showToast('Selecciona las dos fechas del cambio', 'warn')
-      return
-    }
+
+    const requesterName = String(form.requester_name || '').trim()
+    const partnerName = String(form.partner_name || '').trim()
+    const turno = String(form.requester_shift || '').toUpperCase()
+    if (!requesterName) return showToast('Introduce tu nombre', 'warn')
+    if (!['A', 'B', 'C', 'D'].includes(turno)) return showToast('Selecciona un turno válido (A-D)', 'warn')
+    if (!form.current_shift_date) return showToast('Indica el día que solicitas cambiar', 'warn')
+    if (!partnerName) return showToast('Indica el nombre del compañero', 'warn')
+    if (!form.requested_shift_date) return showToast('Indica el día por el que se cambia', 'warn')
+    if (!requesterSignature || !partnerSignature) return showToast('Deben firmar ambos', 'warn')
 
     setSaving(true)
+    const stamp = Date.now()
+    const requesterPath = `cambios-turno/firmas/${stamp}-solicitante.png`
+    const partnerPath = `cambios-turno/firmas/${stamp}-companero.png`
+
+    const upRequester = await uploadSignature(requesterSignature, requesterPath)
+    if (!upRequester.ok) {
+      setSaving(false)
+      return showToast(`No se pudo subir firma del solicitante: ${upRequester.error}`, 'error')
+    }
+    const upPartner = await uploadSignature(partnerSignature, partnerPath)
+    if (!upPartner.ok) {
+      setSaving(false)
+      return showToast(`No se pudo subir firma del compañero: ${upPartner.error}`, 'error')
+    }
+
     const payload = {
       requester_email: email,
-      partner_email: partner,
+      partner_email: email,
+      requester_name: requesterName,
+      requester_shift: turno,
+      partner_name: partnerName,
       current_shift_date: form.current_shift_date,
       requested_shift_date: form.requested_shift_date,
+      requester_signature_url: upRequester.url,
+      partner_signature_url: upPartner.url,
       notes: String(form.notes || '').trim() || null,
       status: 'pendiente',
     }
+
     const { error } = await supabase.from('shift_change_requests').insert(payload)
     setSaving(false)
     if (error) {
-      showToast(`No se pudo guardar solicitud: ${error.message || 'error'} (ejecuta cambios-turno.sql)`, 'error')
+      showToast(`No se pudo guardar solicitud: ${error.message || 'error'} (ejecuta cambios-turno-v2.sql)`, 'error')
       return
     }
-    showToast('Solicitud de cambio enviada', 'ok')
-    setForm({ partner_email: '', current_shift_date: '', requested_shift_date: '', notes: '' })
-    await loadRows()
-  }
 
-  async function updateStatus(row, nextStatus) {
-    if (!canEdit) {
-      showToast('Solo lectura', 'warn')
-      return
-    }
-    const { error } = await supabase
-      .from('shift_change_requests')
-      .update({
-        status: nextStatus,
-        resolved_at: new Date().toISOString(),
-        resolved_by: email || null,
-      })
-      .eq('id', row.id)
-    if (error) {
-      showToast(`No se pudo actualizar: ${error.message || 'error'}`, 'error')
-      return
-    }
-    showToast(`Solicitud ${nextStatus}`, 'ok')
+    showToast('Solicitud de cambio enviada', 'ok')
+    setForm({
+      requester_name: '',
+      requester_shift: 'A',
+      current_shift_date: '',
+      partner_name: '',
+      requested_shift_date: '',
+      notes: '',
+    })
+    setRequesterSignature('')
+    setPartnerSignature('')
     await loadRows()
   }
 
@@ -123,24 +246,38 @@ export default function CambiosTurno() {
           🔄 Cambios de turno
         </div>
         <div style={{ color: 'var(--mid)', fontSize: 13, marginTop: 4 }}>
-          Solicita intercambio de turno entre compañeros y registra su estado.
+          Solicitud formal de intercambio de turno entre compañeros.
         </div>
       </div>
 
       <form className="card" style={{ padding: 16, marginBottom: 16 }} onSubmit={submitRequest}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 170px 170px', gap: 10 }}>
+        <div style={{ display: 'grid', gap: 10 }}>
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Email compañero</label>
+            <label className="form-label">Nombre</label>
             <input
               className="form-input"
-              type="email"
-              value={form.partner_email}
-              onChange={e => setForm(p => ({ ...p, partner_email: e.target.value }))}
-              placeholder="compañero@dominio.com"
+              value={form.requester_name}
+              onChange={e => setForm(p => ({ ...p, requester_name: e.target.value }))}
+              placeholder="Tu nombre y apellidos"
             />
           </div>
+
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Tu fecha</label>
+            <label className="form-label">Turno</label>
+            <select
+              className="form-select"
+              value={form.requester_shift}
+              onChange={e => setForm(p => ({ ...p, requester_shift: e.target.value }))}
+            >
+              <option value="A">A</option>
+              <option value="B">B</option>
+              <option value="C">C</option>
+              <option value="D">D</option>
+            </select>
+          </div>
+
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Solicitar cambiar el día</label>
             <input
               className="form-input"
               type="date"
@@ -148,8 +285,19 @@ export default function CambiosTurno() {
               onChange={e => setForm(p => ({ ...p, current_shift_date: e.target.value }))}
             />
           </div>
+
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Fecha a cambiar</label>
+            <label className="form-label">Con</label>
+            <input
+              className="form-input"
+              value={form.partner_name}
+              onChange={e => setForm(p => ({ ...p, partner_name: e.target.value }))}
+              placeholder="Nombre del compañero"
+            />
+          </div>
+
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Por el día</label>
             <input
               className="form-input"
               type="date"
@@ -159,80 +307,76 @@ export default function CambiosTurno() {
           </div>
         </div>
 
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 }}>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Firma solicitante</label>
+            <SignaturePad value={requesterSignature} onChange={setRequesterSignature} hint="Firma del solicitante" />
+          </div>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Firma compañero</label>
+            <SignaturePad value={partnerSignature} onChange={setPartnerSignature} hint="Firma del compañero" />
+          </div>
+        </div>
+
         <div className="form-group" style={{ marginTop: 10, marginBottom: 0 }}>
-          <label className="form-label">Notas (opcional)</label>
+          <label className="form-label">Observaciones (opcional)</label>
           <textarea
             className="form-input"
-            rows={3}
+            rows={2}
             value={form.notes}
             onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
-            placeholder="Detalle del motivo o acuerdo"
+            placeholder="Observaciones de la solicitud"
           />
         </div>
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
           <button type="button" className="btn btn-ghost btn-sm" onClick={loadRows}>↻ Recargar</button>
           <button type="submit" className="btn btn-primary btn-sm" disabled={!canEdit || saving}>
-            {saving ? 'Enviando...' : 'Solicitar cambio'}
+            {saving ? 'Enviando...' : 'Enviar solicitud'}
           </button>
         </div>
       </form>
 
       <div className="card" style={{ padding: 0 }}>
         <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div className="card-title">📋 Solicitudes ({rows.length})</div>
+          <div className="card-title">📋 Registro de cambios solicitados ({rows.length})</div>
           <div>{statusChip('pendiente')} <span style={{ marginLeft: 6 }}>{pendingCount}</span></div>
         </div>
         {loading ? (
           <div style={{ padding: 14, color: 'var(--mid)' }}>Cargando...</div>
         ) : rows.length === 0 ? (
-          <div style={{ padding: 14, color: 'var(--mid)' }}>Sin solicitudes de cambio de turno.</div>
+          <div style={{ padding: 14, color: 'var(--mid)' }}>Sin solicitudes registradas.</div>
         ) : (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Fecha</th>
-                  <th>Solicita</th>
-                  <th>Compañero</th>
-                  <th>Tu turno</th>
-                  <th>Cambio por</th>
+                  <th>Fecha alta</th>
+                  <th>Nombre</th>
+                  <th>Turno</th>
+                  <th>Cambiar día</th>
+                  <th>Con</th>
+                  <th>Por el día</th>
+                  <th>Firmas</th>
                   <th>Estado</th>
-                  <th>Notas</th>
-                  <th></th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => {
-                  const requester = String(r.requester_email || '').toLowerCase()
-                  const partner = String(r.partner_email || '').toLowerCase()
-                  const mine = email && (requester === email || partner === email)
-                  const canRespond = canEdit && mine && String(r.status || '') === 'pendiente'
-                  const isRequester = requester === email
-                  const isPartner = partner === email
-                  return (
-                    <tr key={r.id}>
-                      <td style={{ fontSize: 12, color: 'var(--mid)' }}>{new Date(r.created_at).toLocaleString('es-ES')}</td>
-                      <td>{r.requester_email}</td>
-                      <td>{r.partner_email}</td>
-                      <td>{r.current_shift_date || '—'}</td>
-                      <td>{r.requested_shift_date || '—'}</td>
-                      <td>{statusChip(r.status)}</td>
-                      <td style={{ maxWidth: 280, color: 'var(--mid)' }}>{r.notes || '—'}</td>
-                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        {canRespond && isPartner && (
-                          <>
-                            <button className="btn btn-ghost btn-sm" onClick={() => updateStatus(r, 'rechazado')}>Rechazar</button>{' '}
-                            <button className="btn btn-primary btn-sm" onClick={() => updateStatus(r, 'aceptado')}>Aceptar</button>
-                          </>
-                        )}
-                        {canRespond && isRequester && (
-                          <button className="btn btn-ghost btn-sm" onClick={() => updateStatus(r, 'cancelado')}>Cancelar</button>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
+                {rows.map((r) => (
+                  <tr key={r.id}>
+                    <td style={{ fontSize: 12, color: 'var(--mid)' }}>{new Date(r.created_at).toLocaleString('es-ES')}</td>
+                    <td>{r.requester_name || r.requester_email || '—'}</td>
+                    <td>{r.requester_shift || '—'}</td>
+                    <td>{r.current_shift_date || '—'}</td>
+                    <td>{r.partner_name || '—'}</td>
+                    <td>{r.requested_shift_date || '—'}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {r.requester_signature_url ? <a href={r.requester_signature_url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">Solicitante</a> : '—'}{' '}
+                      {r.partner_signature_url ? <a href={r.partner_signature_url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">Compañero</a> : ''}
+                    </td>
+                    <td>{statusChip(r.status)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -241,4 +385,3 @@ export default function CambiosTurno() {
     </div>
   )
 }
-
