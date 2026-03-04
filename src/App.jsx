@@ -312,7 +312,7 @@ function MobileQuickNav() {
 }
 
 function MobileRotateHint() {
-  const { mobileRotateHintEnabled } = useApp()
+  const { mobileRotateHintEnabled, authReady, loading, session } = useApp()
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {
@@ -330,6 +330,7 @@ function MobileRotateHint() {
     }
   }, [])
 
+  if (!authReady || loading || !session) return null
   if (!mobileRotateHintEnabled || !visible) return null
 
   return (
