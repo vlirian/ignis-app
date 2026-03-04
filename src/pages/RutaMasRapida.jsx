@@ -5,6 +5,7 @@ import { PDF_CALLES_FILES } from '../data/pdfsCallesManifest'
 
 const ORIGIN = 'Bomberos de Jaén, Avenida de Andalucía s/N, Jaén'
 const ORIGIN_COORDS = '37.77860,-3.81144'
+const STREET_PDFS_BUCKET = import.meta.env.VITE_STREET_PDFS_BUCKET || 'pdfs-calles'
 
 function normalizeSearchText(value) {
   return String(value || '')
@@ -48,6 +49,16 @@ function matchStreetPdf(streetName) {
     .filter(Boolean)
     .sort((a, b) => (a.score - b.score) || (a.delta - b.delta) || a.file.localeCompare(b.file))
   return candidates[0]?.file || null
+}
+
+function buildStreetPdfUrls(fileName) {
+  if (!fileName) return { publicUrl: null, localUrl: null }
+  const localUrl = `/pdfs_calles/${encodeURIComponent(fileName)}`
+  const { data } = supabase.storage.from(STREET_PDFS_BUCKET).getPublicUrl(fileName)
+  return {
+    publicUrl: data?.publicUrl || null,
+    localUrl,
+  }
 }
 
 function estimateStreetWidth(street) {
@@ -180,6 +191,7 @@ export default function RutaMasRapida() {
     const width = resolveStreetWidth(selectedStreet, streetWidthOverrides)
     const destination = streetLabel(selectedStreet)
     const streetPdfFile = matchStreetPdf(selectedStreet?.name || destination)
+    const streetPdfUrls = buildStreetPdfUrls(streetPdfFile)
 
     const steps = [
       `Salida desde parque: ${ORIGIN}.`,
@@ -209,6 +221,7 @@ export default function RutaMasRapida() {
       mapsUrl,
       mapsEmbedUrl,
       streetPdfFile,
+      streetPdfUrls,
     })
 
     setCalculating(false)
@@ -335,13 +348,13 @@ export default function RutaMasRapida() {
             <div className="card" style={{ padding: 12, background: 'var(--panel)', marginTop: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
                 <div style={{ fontSize: 11, color: 'var(--mid)', letterSpacing: 1.2, textTransform: 'uppercase' }}>
-                  Itinerario PDF local
+                  Itinerario PDF (Supabase Storage)
                 </div>
                 <a
                   className="btn btn-ghost btn-sm"
                   target="_blank"
                   rel="noreferrer"
-                  href={`/pdfs_calles/${encodeURIComponent(result.streetPdfFile)}`}
+                  href={result.streetPdfUrls?.publicUrl || result.streetPdfUrls?.localUrl}
                 >
                   Abrir PDF
                 </a>
@@ -349,7 +362,7 @@ export default function RutaMasRapida() {
               <div style={{ width: '100%', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border2)' }}>
                 <iframe
                   title="Itinerario PDF"
-                  src={`/pdfs_calles/${encodeURIComponent(result.streetPdfFile)}`}
+                  src={result.streetPdfUrls?.publicUrl || result.streetPdfUrls?.localUrl}
                   style={{ width: '100%', height: 440, border: 0, display: 'block' }}
                   loading="lazy"
                 />

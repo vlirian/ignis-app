@@ -30,6 +30,7 @@ Crea el archivo `.env` en la raíz del proyecto con:
 ```
 VITE_SUPABASE_URL=https://TU-PROYECTO.supabase.co
 VITE_SUPABASE_ANON_KEY=TU_SUPABASE_ANON_KEY
+VITE_STREET_PDFS_BUCKET=pdfs-calles
 ```
 
 Puedes copiar `.env.example` y editarlo:
@@ -37,6 +38,16 @@ Puedes copiar `.env.example` y editarlo:
 ```
 cp .env.example .env
 ```
+
+## Callejero: PDFs en Supabase Storage (recomendado)
+
+Para que `Ruta más rápida` cargue PDFs online (sin depender de carpeta local):
+
+1. Ejecuta [street-pdfs-storage.sql](/Users/victor/Desktop/ignis-app/street-pdfs-storage.sql) en Supabase SQL Editor.
+2. En Supabase, sube los PDFs al bucket `pdfs-calles`.
+3. Usa la variable `VITE_STREET_PDFS_BUCKET=pdfs-calles` (o el nombre que quieras).
+
+Nota: si no existe el PDF en Storage, la app usa fallback local (`/pdfs_calles/...`).
 
 ## Publicar en web (recomendado: Vercel)
 
