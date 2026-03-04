@@ -5,7 +5,8 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 export default function Alertas() {
-  const { configs, items, revisionIncidents } = useApp()
+  const { configs, items, revisionIncidents, hasPermission, showToast, session, setUnitItemState } = useApp()
+  const canEdit = hasPermission('edit')
   const activeUnitIds = Object.keys(configs || {})
     .map(Number)
     .filter(Number.isFinite)
@@ -17,6 +18,11 @@ export default function Alertas() {
   const [photoViewer, setPhotoViewer] = useState(null) // { urls: string[], index: number, title?: string }
   const [installationIncidents, setInstallationIncidents] = useState([])
   const [vehicleIncidents, setVehicleIncidents] = useState([])
+  const [createType, setCreateType] = useState('material')
+  const [creating, setCreating] = useState(false)
+  const [materialForm, setMaterialForm] = useState({ unitId: '', zoneId: '', itemId: '', note: '' })
+  const [vehicleForm, setVehicleForm] = useState({ unitId: '', title: '', description: '', severity: 'media' })
+  const [installationForm, setInstallationForm] = useState({ title: '', location: '', description: '', severity: 'media' })
 
   useEffect(() => {
     loadInstallationIncidents()
@@ -43,6 +49,201 @@ export default function Alertas() {
       .limit(200)
     if (error) return
     setVehicleIncidents(data || [])
+  }
+
+  const resolveMaterialItemMeta = (alert) => {
+    const unitId = Number(alert?.unitId)
+    if (!Number.isFinite(unitId)) return null
+    let zoneId = String(alert?.zoneId || '').trim()
+    if (!zoneId) {
+      const cfg = configs?.[unitId]
+      if (cfg) {
+        const zones = buildZones(cfg.numCofres, cfg.hasTecho, cfg.hasTrasera)
+        const z = zones.find(z0 => String(z0.label).trim().toLowerCase() === String(alert?.zone || '').trim().toLowerCase())
+        if (z) zoneId = z.id
+      }
+    }
+    if (!zoneId) return null
+    const zoneItems = items?.[unitId]?.[zoneId] || []
+    let item = null
+    if (alert?.itemId) item = zoneItems.find(it => String(it.id) === String(alert.itemId)) || null
+    if (!item) item = zoneItems.find(it => String(it.name).trim().toLowerCase() === String(alert?.item || '').trim().toLowerCase()) || null
+    if (!item) return null
+    return { unitId, zoneId, itemId: item.id, itemName: item.name }
+  }
+
+  async function createMaterialIncident() {
+    if (!canEdit) {
+      showToast('Solo lectura: no puedes crear incidencias', 'warn')
+      return
+    }
+    const unitId = Number(materialForm.unitId)
+    const zoneId = String(materialForm.zoneId || '')
+    const itemId = String(materialForm.itemId || '')
+    if (!Number.isFinite(unitId) || !zoneId || !itemId) {
+      showToast('Selecciona unidad, zona y artículo', 'warn')
+      return
+    }
+    const zone = materialZones.find(z => z.id === zoneId)
+    const item = materialItems.find(it => String(it.id) === itemId)
+    if (!zone || !item) {
+      showToast('No se encontró el artículo seleccionado', 'error')
+      return
+    }
+    const duplicateKey = `${unitId}|${String(zone.label).trim().toLowerCase()}|${String(item.name).trim().toLowerCase()}`
+    if (issueMap.has(duplicateKey)) {
+      showToast('Esa incidencia de material ya existe', 'warn')
+      return
+    }
+
+    setCreating(true)
+    const res = await setUnitItemState(unitId, item.id, { status: 'issue', note: materialForm.note.trim() || 'Marcado desde Incidencias' })
+    setCreating(false)
+    if (!res?.ok) {
+      showToast(`No se pudo crear incidencia: ${res?.error || 'error'}`, 'error')
+      return
+    }
+    setMaterialForm({ unitId: '', zoneId: '', itemId: '', note: '' })
+    showToast('Incidencia de material creada', 'ok')
+  }
+
+  async function createVehicleIncident() {
+    if (!canEdit) {
+      showToast('Solo lectura: no puedes crear incidencias', 'warn')
+      return
+    }
+    const unitId = Number(vehicleForm.unitId)
+    const title = vehicleForm.title.trim()
+    if (!Number.isFinite(unitId) || !title) {
+      showToast('Selecciona unidad y título', 'warn')
+      return
+    }
+    const exists = (vehicleIncidents || []).some(r =>
+      String(r.status) === 'activa' &&
+      Number(r.unit_id) === unitId &&
+      String(r.title || '').trim().toLowerCase() === title.toLowerCase()
+    )
+    if (exists) {
+      showToast('Esa incidencia de vehículo ya existe', 'warn')
+      return
+    }
+
+    setCreating(true)
+    const { error } = await supabase
+      .from('vehicle_incidents')
+      .insert({
+        unit_id: unitId,
+        title,
+        description: vehicleForm.description.trim() || null,
+        severity: vehicleForm.severity,
+        status: 'activa',
+        reported_by: session?.user?.email || null,
+      })
+    setCreating(false)
+    if (error) {
+      showToast(`No se pudo crear incidencia: ${error.message || 'error'}`, 'error')
+      return
+    }
+    setVehicleForm({ unitId: '', title: '', description: '', severity: 'media' })
+    await loadVehicleIncidents()
+    showToast('Incidencia de vehículo creada', 'ok')
+  }
+
+  async function createInstallationIncident() {
+    if (!canEdit) {
+      showToast('Solo lectura: no puedes crear incidencias', 'warn')
+      return
+    }
+    const title = installationForm.title.trim()
+    const location = installationForm.location.trim()
+    if (!title) {
+      showToast('Indica al menos un título', 'warn')
+      return
+    }
+    const exists = (installationIncidents || []).some(r =>
+      String(r.status) === 'activa' &&
+      String(r.title || '').trim().toLowerCase() === title.toLowerCase() &&
+      String(r.location || '').trim().toLowerCase() === location.toLowerCase()
+    )
+    if (exists) {
+      showToast('Esa incidencia de instalaciones ya existe', 'warn')
+      return
+    }
+
+    setCreating(true)
+    const { error } = await supabase
+      .from('installation_incidents')
+      .insert({
+        title,
+        location: location || null,
+        description: installationForm.description.trim() || null,
+        severity: installationForm.severity,
+        status: 'activa',
+        reported_by: session?.user?.email || null,
+      })
+    setCreating(false)
+    if (error) {
+      showToast(`No se pudo crear incidencia: ${error.message || 'error'}`, 'error')
+      return
+    }
+    setInstallationForm({ title: '', location: '', description: '', severity: 'media' })
+    await loadInstallationIncidents()
+    showToast('Incidencia de instalaciones creada', 'ok')
+  }
+
+  async function handleCreateIncident(e) {
+    e.preventDefault()
+    if (createType === 'material') return createMaterialIncident()
+    if (createType === 'vehiculos') return createVehicleIncident()
+    return createInstallationIncident()
+  }
+
+  async function removeMaterialIncident(alert) {
+    const meta = resolveMaterialItemMeta(alert)
+    if (!meta) {
+      showToast('No se pudo resolver/borrar: artículo no encontrado', 'error')
+      return
+    }
+    const ok = window.confirm('¿Eliminar esta incidencia de material?')
+    if (!ok) return
+    const res = await setUnitItemState(meta.unitId, meta.itemId, { status: null, note: '' })
+    if (!res?.ok) {
+      showToast(`No se pudo eliminar incidencia: ${res?.error || 'error'}`, 'error')
+      return
+    }
+    showToast('Incidencia de material eliminada', 'ok')
+  }
+
+  async function removeVehicleIncident(id) {
+    if (!canEdit) {
+      showToast('Solo lectura: no puedes eliminar incidencias', 'warn')
+      return
+    }
+    const ok = window.confirm('¿Eliminar esta incidencia de vehículo?')
+    if (!ok) return
+    const { error } = await supabase.from('vehicle_incidents').delete().eq('id', id)
+    if (error) {
+      showToast(`No se pudo eliminar incidencia: ${error.message || 'error'}`, 'error')
+      return
+    }
+    await loadVehicleIncidents()
+    showToast('Incidencia de vehículo eliminada', 'ok')
+  }
+
+  async function removeInstallationIncident(id) {
+    if (!canEdit) {
+      showToast('Solo lectura: no puedes eliminar incidencias', 'warn')
+      return
+    }
+    const ok = window.confirm('¿Eliminar esta incidencia de instalaciones?')
+    if (!ok) return
+    const { error } = await supabase.from('installation_incidents').delete().eq('id', id)
+    if (error) {
+      showToast(`No se pudo eliminar incidencia: ${error.message || 'error'}`, 'error')
+      return
+    }
+    await loadInstallationIncidents()
+    showToast('Incidencia de instalaciones eliminada', 'ok')
   }
 
   const goToUnitFromAlert = (alert) => {
@@ -78,6 +279,7 @@ export default function Alertas() {
   const reviewIssueAlerts = (revisionIncidents || [])
     .filter(inc => configs[Number(inc.unitId)]?.isActive !== false)
     .map(inc => ({
+    itemId: inc.itemId || null,
     unitId: inc.unitId,
     zone: inc.zone,
     zoneId: inc.zoneId || '',
@@ -94,6 +296,20 @@ export default function Alertas() {
     const key = `${inc.unitId}|${String(inc.zone).trim().toLowerCase()}|${String(inc.item).trim().toLowerCase()}`
     if (!issueMap.has(key)) issueMap.set(key, inc)
   })
+
+  const materialZones = useMemo(() => {
+    const uid = Number(materialForm.unitId)
+    if (!Number.isFinite(uid) || !configs?.[uid]) return []
+    const cfg = configs[uid]
+    return buildZones(cfg.numCofres, cfg.hasTecho, cfg.hasTrasera)
+  }, [configs, materialForm.unitId])
+
+  const materialItems = useMemo(() => {
+    const uid = Number(materialForm.unitId)
+    const zid = String(materialForm.zoneId || '')
+    if (!Number.isFinite(uid) || !zid) return []
+    return (items?.[uid]?.[zid] || [])
+  }, [items, materialForm.unitId, materialForm.zoneId])
 
   const openIssuePhoto = (alert) => {
     const urls = (alert.photoUrls || []).filter(Boolean)
@@ -216,7 +432,7 @@ export default function Alertas() {
           return (
             <button
               key={card.key}
-              onClick={() => setIncidentCategory(card.key)}
+              onClick={() => { setIncidentCategory(card.key); setCreateType(card.key) }}
               className="card"
               style={{
                 textAlign: 'left',
@@ -243,6 +459,114 @@ export default function Alertas() {
           Ver todas
         </button>
       </div>
+
+      <form className="card" style={{ padding: 16, marginBottom: 16 }} onSubmit={handleCreateIncident}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+          <div className="card-title">➕ Crear incidencia desde esta pestaña</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button type="button" className={`btn btn-sm ${createType === 'material' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setCreateType('material')}>🧰 Material</button>
+            <button type="button" className={`btn btn-sm ${createType === 'vehiculos' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setCreateType('vehiculos')}>🚒 Vehículos</button>
+            <button type="button" className={`btn btn-sm ${createType === 'instalaciones' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setCreateType('instalaciones')}>🏢 Instalaciones</button>
+          </div>
+        </div>
+
+        {createType === 'material' && (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 1fr', gap: 10 }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Unidad</label>
+                <select className="form-select" value={materialForm.unitId} onChange={e => setMaterialForm(p => ({ ...p, unitId: e.target.value, zoneId: '', itemId: '' }))}>
+                  <option value="">Seleccionar</option>
+                  {activeUnitIds.map(id => <option key={id} value={id}>U{String(id).padStart(2, '0')}</option>)}
+                </select>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Zona</label>
+                <select className="form-select" value={materialForm.zoneId} onChange={e => setMaterialForm(p => ({ ...p, zoneId: e.target.value, itemId: '' }))} disabled={!materialForm.unitId}>
+                  <option value="">Seleccionar</option>
+                  {materialZones.map(z => <option key={z.id} value={z.id}>{z.label}</option>)}
+                </select>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Artículo</label>
+                <select className="form-select" value={materialForm.itemId} onChange={e => setMaterialForm(p => ({ ...p, itemId: e.target.value }))} disabled={!materialForm.zoneId}>
+                  <option value="">Seleccionar</option>
+                  {materialItems.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="form-group" style={{ marginBottom: 0, marginTop: 10 }}>
+              <label className="form-label">Detalle</label>
+              <input className="form-input" value={materialForm.note} onChange={e => setMaterialForm(p => ({ ...p, note: e.target.value }))} placeholder='Ej: No está / Presenta incidencia en carcasa' />
+            </div>
+          </>
+        )}
+
+        {createType === 'vehiculos' && (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '180px 2fr 180px', gap: 10 }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Unidad</label>
+                <select className="form-select" value={vehicleForm.unitId} onChange={e => setVehicleForm(p => ({ ...p, unitId: e.target.value }))}>
+                  <option value="">Seleccionar</option>
+                  {activeUnitIds.map(id => <option key={id} value={id}>U{String(id).padStart(2, '0')}</option>)}
+                </select>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Título</label>
+                <input className="form-input" value={vehicleForm.title} onChange={e => setVehicleForm(p => ({ ...p, title: e.target.value }))} placeholder="Ej: Faro delantero fundido" />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Prioridad</label>
+                <select className="form-select" value={vehicleForm.severity} onChange={e => setVehicleForm(p => ({ ...p, severity: e.target.value }))}>
+                  <option value="baja">Baja</option>
+                  <option value="media">Media</option>
+                  <option value="alta">Alta</option>
+                  <option value="critica">Crítica</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-group" style={{ marginBottom: 0, marginTop: 10 }}>
+              <label className="form-label">Descripción</label>
+              <textarea className="form-input" rows={3} value={vehicleForm.description} onChange={e => setVehicleForm(p => ({ ...p, description: e.target.value }))} placeholder="Describe la incidencia del vehículo..." />
+            </div>
+          </>
+        )}
+
+        {createType === 'instalaciones' && (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 180px', gap: 10 }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Título</label>
+                <input className="form-input" value={installationForm.title} onChange={e => setInstallationForm(p => ({ ...p, title: e.target.value }))} placeholder="Ej: Puerta principal averiada" />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Ubicación</label>
+                <input className="form-input" value={installationForm.location} onChange={e => setInstallationForm(p => ({ ...p, location: e.target.value }))} placeholder="Ej: Nave 1" />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Prioridad</label>
+                <select className="form-select" value={installationForm.severity} onChange={e => setInstallationForm(p => ({ ...p, severity: e.target.value }))}>
+                  <option value="baja">Baja</option>
+                  <option value="media">Media</option>
+                  <option value="alta">Alta</option>
+                  <option value="critica">Crítica</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-group" style={{ marginBottom: 0, marginTop: 10 }}>
+              <label className="form-label">Descripción</label>
+              <textarea className="form-input" rows={3} value={installationForm.description} onChange={e => setInstallationForm(p => ({ ...p, description: e.target.value }))} placeholder="Describe la incidencia del parque/instalaciones..." />
+            </div>
+          </>
+        )}
+
+        <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={!canEdit || creating}>
+            {creating ? 'Guardando...' : '+ Crear incidencia'}
+          </button>
+        </div>
+      </form>
 
       {/* Summary cards */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
@@ -358,11 +682,16 @@ export default function Alertas() {
                         {a.reportDate ? new Date(a.reportDate + 'T12:00:00').toLocaleDateString('es-ES') : 'Sin fecha'}
                       </td>
                       <td>
-                        {(a.photoUrls || []).length > 0 ? (
-                          <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); openIssuePhoto(a) }}>Ver foto</button>
-                        ) : (
-                          <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); goToUnitFromAlert(a) }}>Ver unidad</button>
-                        )}
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                          {(a.photoUrls || []).length > 0 ? (
+                            <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); openIssuePhoto(a) }}>Ver foto</button>
+                          ) : (
+                            <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); goToUnitFromAlert(a) }}>Ver unidad</button>
+                          )}
+                          <button className="btn btn-danger btn-sm" onClick={(e) => { e.stopPropagation(); removeMaterialIncident(a) }}>
+                            Eliminar
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -405,9 +734,14 @@ export default function Alertas() {
                         {a.reportDate ? new Date(a.reportDate + 'T12:00:00').toLocaleDateString('es-ES') : 'Sin fecha'}
                       </td>
                       <td>
-                        <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); if (Number.isFinite(a.unitId)) goToUnitFromAlert(a) }}>
-                          Ver unidad
-                        </button>
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                          <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); if (Number.isFinite(a.unitId)) goToUnitFromAlert(a) }}>
+                            Ver unidad
+                          </button>
+                          <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); removeVehicleIncident(a.id) }}>
+                            Eliminar
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -431,7 +765,7 @@ export default function Alertas() {
                     <th>Incidencia</th>
                     <th>Descripción</th>
                     <th>Fecha</th>
-                    <th>Origen</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -445,7 +779,11 @@ export default function Alertas() {
                       <td style={{ fontSize: 12, color: 'var(--mid)' }}>
                         {a.reportDate ? new Date(a.reportDate + 'T12:00:00').toLocaleDateString('es-ES') : 'Sin fecha'}
                       </td>
-                      <td><span className="chip chip-gray">Instalaciones</span></td>
+                      <td>
+                        <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); removeInstallationIncident(a.id) }}>
+                          Eliminar
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
