@@ -2,6 +2,7 @@ import { Component, useEffect, useState } from 'react'
 import { Routes, Route, useLocation, NavLink, useNavigate } from 'react-router-dom'
 import { AppProvider, useApp } from './lib/AppContext'
 import { supabase } from './lib/supabase'
+import { formatStreetLabel } from './lib/streetFormat'
 import Sidebar from './components/Sidebar'
 import Toast from './components/Toast'
 import GlobalSearch from './components/GlobalSearch'
@@ -192,7 +193,7 @@ function StreetTopSearch() {
   }
 
   function streetLabel(st) {
-    return `${st?.via_type || ''} ${st?.name || ''}`.trim()
+    return formatStreetLabel(st)
   }
 
   useEffect(() => {

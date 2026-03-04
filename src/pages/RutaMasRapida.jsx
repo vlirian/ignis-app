@@ -4,6 +4,7 @@ import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../lib/AppContext'
+import { formatStreetLabel } from '../lib/streetFormat'
 import { PDF_CALLES_FILES } from '../data/streetPdfsManifest'
 
 const ORIGIN = 'Bomberos de Jaén, Avenida de Andalucía s/N, Jaén'
@@ -21,8 +22,7 @@ function normalizeSearchText(value) {
 }
 
 function streetLabel(street) {
-  if (!street) return ''
-  return `${street.via_type || ''} ${street.name || ''}`.trim()
+  return formatStreetLabel(street)
 }
 
 function findMatchingStreets(streets, queryText) {
@@ -102,7 +102,7 @@ async function resolveStreetPdfSource(fileName) {
     if (!error && data?.signedUrl) {
       return {
         existsInStorage: true,
-        resolvedUrl: data.signedUrl,
+        resolvedUrl: urls.publicUrl || data.signedUrl,
         storageUrl: urls.publicUrl,
         localUrl: urls.localUrl,
       }
@@ -330,8 +330,8 @@ export default function RutaMasRapida() {
       steps.push('ATENCIÓN: la calle destino aparece actualmente cortada en el registro diario.')
     }
 
-    const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(ORIGIN_COORDS)}&destination=${encodeURIComponent(destination + ', Jaén')}`
-    const mapsEmbedUrl = `https://www.google.com/maps?output=embed&saddr=${encodeURIComponent(ORIGIN_COORDS)}&daddr=${encodeURIComponent(destination + ', Jaén')}`
+    const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(ORIGIN_COORDS)}&destination=${encodeURIComponent(destination + ', Jaén')}&travelmode=driving&dir_action=navigate&avoid=tolls|ferries`
+    const mapsEmbedUrl = `https://www.google.com/maps?output=embed&saddr=${encodeURIComponent(ORIGIN_COORDS)}&daddr=${encodeURIComponent(destination + ', Jaén')}&travelmode=driving`
 
     setResult({
       origin: ORIGIN,
@@ -509,6 +509,9 @@ export default function RutaMasRapida() {
           <div className="card" style={{ padding: 12, background: 'var(--panel)', marginTop: 12 }}>
             <div style={{ fontSize: 11, color: 'var(--mid)', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 }}>
               Mapa (Google Maps)
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--mid)', marginBottom: 8 }}>
+              Ruta en modo conducción con optimización de Google y desvíos en tiempo real cuando estén disponibles.
             </div>
             <div style={{ width: '100%', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border2)' }}>
               <iframe

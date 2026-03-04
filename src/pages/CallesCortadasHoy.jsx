@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../lib/AppContext'
+import { formatStreetLabel } from '../lib/streetFormat'
 
 function normalizeSearchText(value) {
   return String(value || '')
@@ -11,8 +12,7 @@ function normalizeSearchText(value) {
 }
 
 function streetLabel(street) {
-  if (!street) return ''
-  return `${street.via_type || ''} ${street.name || ''}`.trim()
+  return formatStreetLabel(street)
 }
 
 export default function CallesCortadasHoy() {

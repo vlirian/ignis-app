@@ -3,6 +3,7 @@ import { useApp } from '../lib/AppContext'
 import { buildZones, unitAlertLevel, unitSummary } from '../data/units'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { formatStreetLabel } from '../lib/streetFormat'
 
 export default function Dashboard() {
   const { configs, items, revisionIncidents } = useApp()
@@ -253,7 +254,7 @@ export default function Dashboard() {
           <div style={{ padding: '8px 20px 16px', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {streetClosuresToday.slice(0, 20).map((c) => {
               const s = c.jaen_streets || {}
-              const name = `${s.via_type || ''} ${s.name || 'Calle'}`.trim()
+              const name = formatStreetLabel(s) || 'Calle'
               return (
                 <button
                   key={c.id}
