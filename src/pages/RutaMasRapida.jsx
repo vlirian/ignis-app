@@ -61,6 +61,37 @@ function buildStreetPdfUrls(fileName) {
   }
 }
 
+async function resolveStreetPdfSource(fileName) {
+  if (!fileName) {
+    return {
+      existsInStorage: false,
+      resolvedUrl: null,
+      storageUrl: null,
+      localUrl: null,
+    }
+  }
+  const urls = buildStreetPdfUrls(fileName)
+  try {
+    const { data, error } = await supabase.storage.from(STREET_PDFS_BUCKET).createSignedUrl(fileName, 60)
+    if (!error && data?.signedUrl) {
+      return {
+        existsInStorage: true,
+        resolvedUrl: data.signedUrl,
+        storageUrl: urls.publicUrl,
+        localUrl: urls.localUrl,
+      }
+    }
+  } catch (_) {
+    // fallback local
+  }
+  return {
+    existsInStorage: false,
+    resolvedUrl: urls.localUrl,
+    storageUrl: urls.publicUrl,
+    localUrl: urls.localUrl,
+  }
+}
+
 function estimateStreetWidth(street) {
   const type = String(street?.via_type || '').toUpperCase()
   const name = normalizeSearchText(street?.name)
@@ -180,7 +211,7 @@ export default function RutaMasRapida() {
     return (activeClosures || []).find((c) => Number(c.street_id) === Number(selectedStreet.id)) || null
   }, [activeClosures, selectedStreet])
 
-  function calculateRoute() {
+  async function calculateRoute() {
     if (!selectedStreet) {
       showToast('Selecciona una calle de destino', 'warn')
       return
@@ -191,7 +222,7 @@ export default function RutaMasRapida() {
     const width = resolveStreetWidth(selectedStreet, streetWidthOverrides)
     const destination = streetLabel(selectedStreet)
     const streetPdfFile = matchStreetPdf(selectedStreet?.name || destination)
-    const streetPdfUrls = buildStreetPdfUrls(streetPdfFile)
+    const streetPdfResolution = await resolveStreetPdfSource(streetPdfFile)
 
     const steps = [
       `Salida desde parque: ${ORIGIN}.`,
@@ -221,7 +252,12 @@ export default function RutaMasRapida() {
       mapsUrl,
       mapsEmbedUrl,
       streetPdfFile,
-      streetPdfUrls,
+      streetPdfUrls: {
+        publicUrl: streetPdfResolution.storageUrl,
+        localUrl: streetPdfResolution.localUrl,
+        resolvedUrl: streetPdfResolution.resolvedUrl,
+      },
+      streetPdfExistsInStorage: streetPdfResolution.existsInStorage,
     })
 
     setCalculating(false)
@@ -354,15 +390,20 @@ export default function RutaMasRapida() {
                   className="btn btn-ghost btn-sm"
                   target="_blank"
                   rel="noreferrer"
-                  href={result.streetPdfUrls?.publicUrl || result.streetPdfUrls?.localUrl}
+                  href={result.streetPdfUrls?.resolvedUrl || result.streetPdfUrls?.publicUrl || result.streetPdfUrls?.localUrl}
                 >
                   Abrir PDF
                 </a>
               </div>
+              {!result.streetPdfExistsInStorage && (
+                <div className="chip chip-warn" style={{ marginBottom: 8 }}>
+                  No existe en Storage. Archivo esperado: <code>{result.streetPdfFile}</code>
+                </div>
+              )}
               <div style={{ width: '100%', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border2)' }}>
                 <iframe
                   title="Itinerario PDF"
-                  src={result.streetPdfUrls?.publicUrl || result.streetPdfUrls?.localUrl}
+                  src={result.streetPdfUrls?.resolvedUrl || result.streetPdfUrls?.publicUrl || result.streetPdfUrls?.localUrl}
                   style={{ width: '100%', height: 440, border: 0, display: 'block' }}
                   loading="lazy"
                 />
