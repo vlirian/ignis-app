@@ -20,6 +20,36 @@ const DEFAULT_BV_UNITS = {
   7: [5, 8, 20],
 }
 
+const UI_LOCAL_KEYS = {
+  material_menu: 'ignis:ui:material_menu',
+  mobile_rotate_hint: 'ignis:ui:mobile_rotate_hint',
+  mobile_banners: 'ignis:ui:mobile_banners',
+}
+
+function isMissingAppUiSettingsError(error) {
+  const msg = String(error?.message || '').toLowerCase()
+  return msg.includes('app_ui_settings') || msg.includes('schema cache') || msg.includes('does not exist')
+}
+
+function readLocalUiSetting(key, defaultValue = true) {
+  try {
+    const raw = window.localStorage.getItem(UI_LOCAL_KEYS[key])
+    if (raw === '1') return true
+    if (raw === '0') return false
+  } catch {
+    // ignore
+  }
+  return defaultValue
+}
+
+function writeLocalUiSetting(key, enabled) {
+  try {
+    window.localStorage.setItem(UI_LOCAL_KEYS[key], enabled ? '1' : '0')
+  } catch {
+    // ignore
+  }
+}
+
 function normalizeUnitId(raw) {
   const n = Number(raw)
   if (Number.isFinite(n)) return n
@@ -232,8 +262,9 @@ export function AppProvider({ children }) {
         if (!uiErr) {
           const enabled = uiRow?.value_json?.enabled
           setMaterialMenuEnabledState(enabled === undefined ? true : !!enabled)
+          writeLocalUiSetting('material_menu', enabled === undefined ? true : !!enabled)
         } else {
-          setMaterialMenuEnabledState(true)
+          setMaterialMenuEnabledState(readLocalUiSetting('material_menu', true))
         }
 
         const { data: rotateRow, error: rotateErr } = await supabase
@@ -244,8 +275,9 @@ export function AppProvider({ children }) {
         if (!rotateErr) {
           const enabled = rotateRow?.value_json?.enabled
           setMobileRotateHintEnabledState(enabled === undefined ? true : !!enabled)
+          writeLocalUiSetting('mobile_rotate_hint', enabled === undefined ? true : !!enabled)
         } else {
-          setMobileRotateHintEnabledState(true)
+          setMobileRotateHintEnabledState(readLocalUiSetting('mobile_rotate_hint', true))
         }
 
         const { data: bannersRow, error: bannersErr } = await supabase
@@ -256,13 +288,14 @@ export function AppProvider({ children }) {
         if (!bannersErr) {
           const enabled = bannersRow?.value_json?.enabled
           setMobileBannersEnabledState(enabled === undefined ? true : !!enabled)
+          writeLocalUiSetting('mobile_banners', enabled === undefined ? true : !!enabled)
         } else {
-          setMobileBannersEnabledState(true)
+          setMobileBannersEnabledState(readLocalUiSetting('mobile_banners', true))
         }
       } catch {
-        setMaterialMenuEnabledState(true)
-        setMobileRotateHintEnabledState(true)
-        setMobileBannersEnabledState(true)
+        setMaterialMenuEnabledState(readLocalUiSetting('material_menu', true))
+        setMobileRotateHintEnabledState(readLocalUiSetting('mobile_rotate_hint', true))
+        setMobileBannersEnabledState(readLocalUiSetting('mobile_banners', true))
       }
 
       const { data: cfgData, error: cfgErr } = await supabase.from('unit_configs').select('*')
@@ -1032,7 +1065,13 @@ export function AppProvider({ children }) {
         value_json: { enabled: next },
         updated_by: session?.user?.email || null,
       }, { onConflict: 'key' })
-    if (error) return { ok: false, error: error.message || 'db_error' }
+    if (error) {
+      if (!isMissingAppUiSettingsError(error)) return { ok: false, error: error.message || 'db_error' }
+      writeLocalUiSetting('material_menu', next)
+      setMaterialMenuEnabledState(next)
+      return { ok: true, fallback: 'local' }
+    }
+    writeLocalUiSetting('material_menu', next)
     setMaterialMenuEnabledState(next)
     return { ok: true }
   }, [isAdmin, session?.user?.email])
@@ -1047,7 +1086,13 @@ export function AppProvider({ children }) {
         value_json: { enabled: next },
         updated_by: session?.user?.email || null,
       }, { onConflict: 'key' })
-    if (error) return { ok: false, error: error.message || 'db_error' }
+    if (error) {
+      if (!isMissingAppUiSettingsError(error)) return { ok: false, error: error.message || 'db_error' }
+      writeLocalUiSetting('mobile_rotate_hint', next)
+      setMobileRotateHintEnabledState(next)
+      return { ok: true, fallback: 'local' }
+    }
+    writeLocalUiSetting('mobile_rotate_hint', next)
     setMobileRotateHintEnabledState(next)
     return { ok: true }
   }, [isAdmin, session?.user?.email])
@@ -1062,7 +1107,13 @@ export function AppProvider({ children }) {
         value_json: { enabled: next },
         updated_by: session?.user?.email || null,
       }, { onConflict: 'key' })
-    if (error) return { ok: false, error: error.message || 'db_error' }
+    if (error) {
+      if (!isMissingAppUiSettingsError(error)) return { ok: false, error: error.message || 'db_error' }
+      writeLocalUiSetting('mobile_banners', next)
+      setMobileBannersEnabledState(next)
+      return { ok: true, fallback: 'local' }
+    }
+    writeLocalUiSetting('mobile_banners', next)
     setMobileBannersEnabledState(next)
     return { ok: true }
   }, [isAdmin, session?.user?.email])
