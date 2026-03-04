@@ -1,4 +1,4 @@
-import logoLeo from '../../L.E.O.png'
+import logoLeo from '../../leo.png'
 
 export default function BrandLogo({
   size = 'md',
